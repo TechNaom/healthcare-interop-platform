@@ -69,11 +69,13 @@ flowchart TB
         subgraph "Internal PHI zone — no public ingress"
             ME_PY["messaging-engine-py\n(includes validation/transform — Python-only for now)"]
             DB[(Postgres\nreference DB)]
+            KC[Keycloak\nidentity provider]
             VAULT[(Vault\nKeyManager default)]
             MINIO[(MinIO/local FS\nObjectStore default)]
         end
     end
     GW --> ME_PY --> DB
+    GW -.validates tokens.-> KC
     GW -.-> VAULT
     ME_PY -.-> MINIO
 ```
@@ -89,6 +91,7 @@ The internal PHI zone is not reachable from outside the container network direct
 | High-throughput validate/transform | **Future phase — C++20, not built now** | Deferred; interface boundary designed in so it can be added later, see [ADR-006](DECISIONS.md#adr-006) |
 | Python↔C++ boundary (future) | gRPC (default), pybind11 (fallback) | Design reserved for the future C++ phase — [ADR-002](DECISIONS.md#adr-002) |
 | Reference DB | PostgreSQL | Mature, strong encryption/RBAC support, not a hard dependency (abstracted) |
+| Identity provider | Keycloak (self-hosted) | OIDC + SAML in one component; token lifecycle/revocation/rotation as config rather than hand-written security code — see [ADR-008](DECISIONS.md#adr-008) |
 | Reference KeyManager | HashiCorp Vault (self-hosted) | Self-hostable, avoids cloud KMS lock-in |
 | Reference ObjectStore | MinIO / local FS | S3-compatible without requiring AWS |
 | Reference MessageBus | Kafka or RabbitMQ (config-selectable) | Only introduced if a phase actually needs async decoupling |

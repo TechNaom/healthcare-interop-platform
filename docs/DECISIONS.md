@@ -88,3 +88,40 @@ Short-form ADRs — Status / Context / Decision / Consequences. New decisions ge
 **Decision:** Use GitHub Actions on GitHub-hosted runners for this private repo's CI (build, test, lint/static analysis per [SRS §10.3](SRS.md#10-implementation-and-testing-requirements)).
 
 **Consequences:** No extra infrastructure to stand up or maintain. CI logs and build output live on GitHub's infrastructure during runs, same trust boundary already accepted for source storage. The synthetic-data-only rule ([ADR-005](#adr-005)) is what makes this safe — CI never has real PHI to leak in the first place, so the added exposure from GitHub-hosted runners is minimal. If real PHI processing ever needs to run through CI (e.g. a future compliance-hardening phase), revisit this decision before that happens — it would need a signed BAA with GitHub or a move to a self-hosted runner, not an assumption that this ADR still applies.
+
+---
+
+## ADR-008: Self-hosted Keycloak for identity, from day one
+
+**Status:** Accepted, 2026-08-24
+
+**Context:** [SRS §5.1](SRS.md#51-access-control) requires token-based auth (OAuth 2.0/OIDC), RBAC combined with ABAC, and automatic logoff/session expiry. [SRS §4.2.5](SRS.md#42-fhir-api-services-python) additionally raises SMART-on-FHIR scopes if a consuming app needs them. Full institutional SSO/SAML federation remains an open item ([SRS §11](SRS.md#11-open-items-and-conflicts--not-silently-resolved)) — the original roadmap scoped it out as needing a separate procurement conversation.
+
+An earlier draft proposed issuing and validating JWTs directly in the Gateway (`PyJWT`/`python-jose`) as the simpler pilot option, deferring any identity server.
+
+**Decision:** Use **self-hosted Keycloak** as the identity provider from the start, rather than hand-rolling JWT issuance in the Gateway.
+
+**Rationale:** "Just issue JWTs" understates the actual surface. Meeting the requirements above by hand means building and owning token lifecycle, refresh, revocation, signing-key rotation, and session expiry — security-critical code that must later be defended to an auditor. Keycloak provides all of it as configuration, is self-hostable (so no BAA question, consistent with [ADR-003](#adr-003) and the no-SaaS-without-BAA rule), and speaks **both** OIDC and SAML. That last point converts the open SSO/SAML item from a potential rewrite into a realm configuration change.
+
+**Consequences:**
+- One more container in the Compose stack and a real component to configure — the honest cost of this decision.
+- RBAC/ABAC enforcement still lives in `gateway.auth` ([DESIGN.md §1](DESIGN.md#1-module-breakdown)); Keycloak supplies identity and tokens, it does not become the authorization logic. The Gateway remains the single enforcement point.
+- If SSO/SAML federation is later confirmed in scope, it is a Keycloak identity-brokering configuration rather than an auth rewrite.
+- Revisit only if a concrete constraint makes running Keycloak impossible in the target environment — not for perceived simplicity.
+
+---
+
+## ADR-009: Audit-log anomaly detection is self-hosted, and out of initial scope
+
+**Status:** Accepted, 2026-08-24
+
+**Context:** The client-provided SRS lists "Cyber security AI" under audit controls ([SRS §5.4](SRS.md#54-audit-logging)). It was left deliberately unresolved as an open item, since the phrasing did not distinguish a self-hosted component from a third-party service.
+
+**Decision:** Any AI/anomaly-detection capability over the audit log will be a **self-hosted component** operating on the audit store inside the platform's own infrastructure. No third-party "security AI" service is adopted. The capability itself is **deferred out of the initial build** and is not required for HIPAA compliance.
+
+**Rationale:** HIPAA §164.312(b) requires audit *controls* — recording and enabling examination of ePHI access. That obligation is met by the append-only audit log ([SRS §5.4](SRS.md#54-audit-logging)), not by an AI layer on top of it. Shipping audit metadata (which identifies who accessed which patient record and when — sensitive in its own right) to an external vendor would require a signed BAA and create an ongoing third-party exposure, in exchange for a capability that is an enhancement rather than a requirement.
+
+**Consequences:**
+- The audit log schema must be queryable enough to support later analysis — a design consideration for the persistence layer now, even though the analysis component is not built.
+- When scheduled, a first implementation is a scheduled Python job over the audit table detecting: access-count outliers per user, access at unusual hours, and access to patient records with no related encounter. No external dependency, no BAA.
+- If the client later insists on a specific third-party product, this ADR is superseded — and a signed BAA is a precondition, not a follow-up.

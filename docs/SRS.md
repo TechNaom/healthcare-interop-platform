@@ -92,7 +92,7 @@ Full technical-safeguard mapping and rationale in [SECURITY_AND_COMPLIANCE.md](S
 1. The system shall generate structured audit logs for all PHI operations, capturing: user/service identity, patient/resource identifiers, operation (create/read/update/delete/search), timestamp, and source IP/host.
 2. Audit logs shall be written to an immutable/WORM-capable store (e.g. object-lock storage, append-only DB) with retention aligned to regulatory expectations (commonly 6 years — confirm exact figure with the client's compliance function, not assumed here).
 3. Logging shall be standardized across the codebase (structured logging library), so every component forwards events to the same sink in the same shape.
-4. **AI-assisted anomaly detection over audit logs** is a requested capability. Treated as a **future/optional enhancement**, not initial build scope: if it uses a third-party service, it needs a signed BAA first like any other third-party touching audit metadata ([SECURITY_AND_COMPLIANCE.md §5](SECURITY_AND_COMPLIANCE.md)); a self-hosted anomaly-detection component would not need one. Which approach is wanted is an open item — see §11.
+4. **AI-assisted anomaly detection over audit logs** — resolved by [ADR-009](DECISIONS.md#adr-009): self-hosted only, and deferred out of the initial build. HIPAA §164.312(b) requires audit *controls*, which requirements 1–3 above satisfy; the AI layer is an enhancement, not a compliance requirement. No third-party security-AI service is adopted.
 
 ### 5.5 Integrity and validation
 
@@ -161,11 +161,14 @@ Full technical-safeguard mapping and rationale in [SECURITY_AND_COMPLIANCE.md](S
 
 | # | Item | Why it's open |
 |---|---|---|
-| 1 | **SSO/SAML institutional federation** (§5.1) | This SRS requires it; the original roadmap explicitly scoped full OAuth2/OIDC+SAML SSO federation **out** of the initial build as needing a separate procurement conversation with a real IdP. Baseline OAuth2/OIDC token auth is in scope either way — the open question is whether full SAML federation is needed for the pilot or deferred as originally planned. |
-| 2 | **AI-assisted audit-log anomaly detection** (§5.4) | Requested capability, not yet scoped as self-hosted vs. third-party. Third-party requires a BAA first. |
-| 3 | **Build track** | 8-week vs. 12-week AI-orchestrated timeline — default assumed 12-week, unconfirmed. |
-| 4 | **Availability SLA figure** (§7.2) | No number invented here; needs a client-side commitment. |
-| 5 | **Audit-log retention period** (§5.4.2) | "6 years" used as a common reference point, not confirmed against the client's actual regulatory obligation. |
+| 1 | **SSO/SAML institutional federation** (§5.1) | Partially resolved: [ADR-008](DECISIONS.md#adr-008) adopts self-hosted Keycloak, which speaks both OIDC and SAML — so enabling federation later is a configuration change, not a rewrite. Still open: **whether SAML federation is needed for the pilot itself**, which depends on the client having an institutional IdP ready to broker against. |
+| 2 | **PHI retention period** ([DATA_MODEL.md](DATA_MODEL.md#retention--deletion)) | Not derivable from the technical spec — needs the client's compliance function. Distinct from audit-log retention (item 5). |
+| 3 | **Patient amendment / deletion handling** (45 CFR §164.526) | Patients may request corrections to their records. This implies canonical entities need version history rather than in-place overwrite, which affects the persistence schema — a design decision that should be settled before Phase 1, not retrofitted. |
+| 4 | **Build track** | 8-week vs. 12-week AI-orchestrated timeline — default assumed 12-week, unconfirmed. |
+| 5 | **Availability SLA figure** (§7.2) | No number invented here; needs a client-side commitment. |
+| 6 | **Audit-log retention period** (§5.4.2) | "6 years" used as a common reference point, not confirmed against the client's actual regulatory obligation. |
+
+**Resolved since v0.2.0:** AI-assisted audit-log anomaly detection — settled as self-hosted and out of initial scope by [ADR-009](DECISIONS.md#adr-009).
 
 ## 12. Constraints and assumptions
 

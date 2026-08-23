@@ -24,10 +24,10 @@ One-page answer to "for this requirement, what are we actually using." Organized
 
 | Requirement | What we're using |
 |---|---|
-| **5.1 Access control** | Token-based auth (OAuth 2.0/OIDC bearer tokens), RBAC+ABAC checks centralized in `gateway.auth`. **Proposed, not yet confirmed:** issue/validate JWTs directly in the Gateway (`python-jose` or `PyJWT`) for the pilot — no separate identity-provider service to stand up. If full SSO/SAML federation gets confirmed as in-scope (still open, [SRS §11](SRS.md#11-open-items-and-conflicts--not-silently-resolved)), the natural upgrade is **self-hosted Keycloak**, since it speaks both OIDC and SAML — swapping to it later doesn't change the RBAC/ABAC logic, only where tokens come from. |
+| **5.1 Access control** | **Self-hosted Keycloak** as identity provider ([ADR-008](DECISIONS.md#adr-008)) — issues/validates OIDC tokens, and handles refresh, revocation, signing-key rotation, and session expiry as configuration rather than hand-written code. RBAC+ABAC enforcement stays in `gateway.auth`; Keycloak supplies identity, not authorization logic. Speaks SAML too, so if institutional SSO federation is later confirmed in scope it's a realm config change, not an auth rewrite. |
 | **5.2 Transmission security** | TLS 1.2+ terminated at a reverse proxy in front of the Gateway — **Traefik** (Compose/K8s-native, picks up cert renewal cleanly) rather than building TLS into the FastAPI process itself. |
 | **5.3 Encryption** | At rest: AES-256 (above). In transit: TLS 1.2+ (above). Keys: **HashiCorp Vault**, self-hosted, via the `KeyManager` interface — never a cloud KMS. |
-| **5.4 Audit logging** | Append-only Postgres table (above) + `structlog` for structured application logging, one event shape across every module. AI-assisted anomaly detection over the audit log is still an **open item** ([SRS §11](SRS.md#11-open-items-and-conflicts--not-silently-resolved)) — not built until you confirm self-hosted vs. third-party. |
+| **5.4 Audit logging** | Append-only Postgres table (above) + `structlog` for structured application logging, one event shape across every module. AI-assisted anomaly detection: **self-hosted only, deferred out of initial scope** ([ADR-009](DECISIONS.md#adr-009)) — when built, a scheduled Python job over the audit table, no external service. |
 | **5.5 Integrity & validation** | Schema validation via `fhir.resources` (FHIR) and `python-hl7` (HL7 structure) at ingestion. Payload integrity: SHA-256 checksums (Python `hashlib`) on stored large payloads. |
 | **Privacy / de-identification (§6)** | Structured-field Safe Harbor rules: a Python module operating directly on the canonical model fields already mapped in [DATA_MODEL.md](DATA_MODEL.md) — this is plain field transformation (drop/generalize/date-shift), not a library dependency. Unstructured-text de-id (deferred, per roadmap) would use **Presidio** (Microsoft, open-source, self-hostable — no BAA needed since nothing leaves your infrastructure) when that phase is scheduled. |
 
@@ -53,7 +53,7 @@ One-page answer to "for this requirement, what are we actually using." Organized
 | ObjectStore | MinIO (self-hosted, if/when a phase needs blob storage) |
 | Observability | OpenTelemetry → Prometheus + Grafana (self-hosted) |
 | Logging | `structlog` |
-| Auth | JWT (proposed) → Keycloak (future, only if SSO/SAML confirmed) |
+| Auth | Self-hosted Keycloak (OIDC now, SAML available if federation is confirmed) |
 | Testing | `pytest` |
 | CI | GitHub Actions on the private repo ([ADR-007](DECISIONS.md#adr-007)) |
 | Static analysis | `ruff` (lint), `mypy` (types), `bandit` (security lint) — run in CI |
@@ -76,9 +76,8 @@ Carried over from the client-provided detailed SRS, for provenance:
 
 ## What still needs your sign-off before Phase 0
 
-Everything above is either already-decided-elsewhere or a low-risk default. Two things aren't:
+The two technology choices previously listed here are now decided — Keycloak ([ADR-008](DECISIONS.md#adr-008)) and self-hosted audit anomaly detection ([ADR-009](DECISIONS.md#adr-009)). Every technology choice in this document is settled.
 
-1. **Auth: JWT-in-Gateway vs. Keycloak from day one.** JWT is simpler and matches "no SSO/SAML for the pilot." If you already know you want Keycloak (e.g. because SSO is coming soon regardless), better to start there than migrate later.
-2. **Audit-log AI monitoring** — still needs your answer on self-hosted vs. third-party (unchanged from before).
+What remains open is **not** technology selection but client-side input that no technical decision can substitute for — tracked in [SRS §11](SRS.md#11-open-items-and-conflicts--not-silently-resolved): PHI retention period, patient amendment/deletion handling, whether SAML federation is needed for the pilot, the availability SLA figure, and confirmed audit-log retention. Of these, **patient amendment/deletion handling affects the persistence schema**, so it's worth settling before Phase 1 rather than after.
 
 Everything else in this document is ready to build against as soon as you say go.

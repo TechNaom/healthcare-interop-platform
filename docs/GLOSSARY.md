@@ -25,4 +25,7 @@
 | **KMS** | Key Management System — centralized management of encryption keys and certificates; this project's `KeyManager` interface, Vault by default. |
 | **SIEM** | Security Information and Event Management — a system that aggregates and analyzes security event data; self-hosted/internal by default here, no third-party SIEM without a BAA. |
 | **SMART on FHIR** | A standard for OAuth 2.0-based app authorization launched in a FHIR context (scopes, launch context) — relevant only if a consuming app requires app-launch semantics beyond baseline API auth. |
+| **Keycloak** | Open-source, self-hostable identity and access management server — this project's identity provider, speaking both OIDC and SAML ([ADR-008](DECISIONS.md#adr-008)). |
+| **ConceptMap** | A FHIR resource defining how codes in one system translate to another; HL7 publishes official v2-to-FHIR ConceptMaps that this project's canonical mappings follow. |
+| **Dead-letter store** | Where messages that fail parsing, validation, or transformation are retained for diagnosis. Contains raw HL7 payloads, therefore classified as a **PHI store**, not a debug log. |
 
