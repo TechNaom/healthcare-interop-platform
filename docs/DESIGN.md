@@ -96,8 +96,8 @@ sequenceDiagram
 
 ## 4. Error handling & ACK/NACK strategy
 
-- Structural failures (malformed HL7, unparseable segments) → immediate NACK, message routed to dead-letter store, never silently dropped ([FR-1.6](SRS.md#51-hl7-v2-ingestion)).
-- Transform failures (valid HL7, no canonical mapping rule) → logged with source message ID + failing field ([FR-2.3](SRS.md#52-canonical-transformation)), routed to dead-letter store, does not crash the listener process.
+- Structural failures (malformed HL7, unparseable segments) → immediate NACK, message routed to dead-letter store, never silently dropped ([SRS §4.1.6](SRS.md#41-hl7-v2-message-handling)).
+- Transform failures (valid HL7, no canonical mapping rule) → logged with source message ID + failing field ([SRS §4.1.5](SRS.md#41-hl7-v2-message-handling)), routed to dead-letter store, does not crash the listener process.
 - FHIR write failures → `OperationOutcome` per FHIR spec, no partial writes (transaction boundary at the canonical-mapper level).
 
 ## 5. Pluggable infrastructure — interface shapes
@@ -117,7 +117,7 @@ Each has exactly one reference implementation named in [ARCHITECTURE.md §4](ARC
 - **Contract tests** — gRPC boundary between Python and C++ validator, run on every change to either side.
 - **Integration tests** — full HL7-in → FHIR-out round trip against synthetic ADT/ORM/ORU fixtures.
 - **Compliance tests** — audit log completeness (every PHI access produces exactly one entry), de-identification completeness (no Safe Harbor identifier category present in de-identified output).
-- All fixtures are synthetic. No real PHI enters any test path, ever ([NFR-7](SRS.md#6-non-functional-requirements)).
+- All fixtures are synthetic. No real PHI enters any test path, ever ([ADR-005](DECISIONS.md#adr-005)).
 
 ## 7. Configuration
 

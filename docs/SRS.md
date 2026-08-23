@@ -1,140 +1,179 @@
 # Software Requirements Specification
 
 **Project:** Healthcare Interoperability Platform
-**Status:** Draft — pending sign-off on assumptions in §9
-**Version:** 0.1.0 · 2026-08-24
+**Status:** Draft — pending sign-off on open items in §11
+**Version:** 0.2.0 · 2026-08-24 (supersedes 0.1.0 — restructured around client-provided detailed SRS, merged with existing ADRs)
 
-Requirement IDs are stable identifiers — reference them in code comments, tests, and PRs once build starts, so a requirement traces to the commit(s) that satisfy it.
+Section numbers below double as stable requirement identifiers (e.g. `4.1.3`) — reference them in code comments, tests, and PRs once build starts.
 
 ---
 
-## 1. Purpose & scope
+## 1. Purpose and scope
 
-This platform ingests HL7 v2 messages and serves/accepts FHIR R4/R5 resources for a healthcare organization, transforming between the two through one internal canonical data model, while meeting HIPAA technical-safeguard expectations for anything touching Protected Health Information (PHI).
+This document defines functional, non-functional, security, and compliance requirements for a healthcare data integration platform that processes HL7 v2 and FHIR messages in a HIPAA-aligned manner, using **Python for API/orchestration**. C++ for high-performance/low-level components is a **documented future phase, not current build scope** — see [ADR-006](DECISIONS.md#adr-006).
 
-**In scope:** HL7 v2 ingestion (ADT, ORM, ORU), FHIR R4/R5 REST API, canonical transformation, PHI/audit/de-identified persistence, RBAC, encryption, Safe Harbor de-identification, containerized deployment.
+The system exposes APIs and services to ingest, transform, validate, store, and exchange clinical data between EHRs, ancillary systems, and analytics/AI components, enforcing privacy and security controls aligned to HIPAA technical safeguards.
 
-**Out of scope for the initial build** (see [ROADMAP §Out of scope](<../Healthcare Interop Platform.md#out-of-scope-for-either-track--and-why-more-weeks-wouldnt-fix-it>) for rationale): SSO/SAML federation, third-party pen-testing, NLP-based de-identification, multi-region HA, formal traceability matrix.
+## 2. Standards and references
 
-## 2. Definitions
+- **HL7 Version 2.x** messaging standard for legacy interfaces (ADT, ORM, ORU).
+- **HL7 FHIR R4/R5** for RESTful APIs and modern interoperability.
+- **HIPAA Security Rule** technical safeguards: access control, audit controls, integrity, person/entity authentication, transmission security (full mapping in [SECURITY_AND_COMPLIANCE.md](SECURITY_AND_COMPLIANCE.md)).
+- **Python ecosystem:** `python-hl7` (or equivalent) for HL7 v2 parsing; `fhir.resources` / `fhirclient` for FHIR resource modeling and validation; FastAPI as the web framework; `structlog` (or equivalent) for structured audit-capable logging.
+- **C++ ecosystem (future phase):** a FHIR-capable library such as `fhircpp`, or custom C++ models aligned to the official HL7 FHIR specification — not selected/committed until the C++ phase is scheduled.
 
-See [GLOSSARY.md](GLOSSARY.md) for all acronyms (HL7, FHIR, PHI, BAA, RBAC, etc.).
+## 3. System architecture overview
 
-## 3. System overview
+Full detail in [ARCHITECTURE.md](ARCHITECTURE.md). Summary: a layered architecture —
 
-Four layers — Integration Gateway, Messaging Engine, Persistence, Security & Compliance Services — detailed in [ARCHITECTURE.md](ARCHITECTURE.md). HL7 v2 and FHIR both map to and from one canonical model rather than being translated pairwise (see [ADR-001](DECISIONS.md#adr-001)).
+1. **Integration Gateway (Python)** — FastAPI-based REST layer for FHIR APIs and admin endpoints; authN/authZ, request validation, throttling, error handling.
+2. **Messaging Engine (Python-only for now)** — HL7 v2 parsing, routing, transformation, and validation, all in Python. High-volume/low-latency validation in C++ is a future phase behind the same module boundary ([ADR-006](DECISIONS.md#adr-006)).
+3. **Data Persistence Layer** — HIPAA-aligned store with encryption at rest for PHI; separate immutable/WORM-capable audit-log store; separate de-identified store.
+4. **Security & Compliance Services** — centralized audit logging, key management, de-identification services, minimum-necessary access configuration.
 
-## 4. Actors
+## 4. Functional requirements
 
-| Actor | Description |
-|---|---|
-| **Sending EHR / HL7 source system** | Pushes HL7 v2 messages via MLLP, HTTP, or file-drop |
-| **FHIR client** | Consumes or writes FHIR resources via the REST API (clinical app, analytics tool, another integration engine) |
-| **Integration Administrator** | Configures routing, credentials, and monitors message flow |
-| **Auditor / Compliance Officer** | Reads audit logs, verifies access-control and de-identification behavior; never touches raw PHI beyond what their role permits |
-| **Analytics / AI consumer** | Reads only from the de-identified store, never the PHI store |
+### 4.1 HL7 v2 message handling
 
-## 5. Functional requirements
+1. The system shall support ingestion of HL7 v2.x messages over MLLP, file-drop, and HTTP-based APIs.
+2. The system shall parse HL7 v2 messages into structured objects using a Python HL7 library.
+3. The system shall validate HL7 v2 messages against configurable profiles (message types, segments, required fields).
+4. The system shall support routing rules based on message type (e.g. `ADT^A01`, `ORM^O01`) and key fields (PID, PV1, ORC).
+5. The system shall support transformation of HL7 v2 messages to the internal canonical model, and from there to equivalent FHIR resources (e.g. PID → `Patient`, ORC/OBR → `ServiceRequest`/`DiagnosticReport`) — see [DATA_MODEL.md](DATA_MODEL.md) for the full mapping.
+6. The system shall provide ACK/NACK responses with meaningful, structured error codes for failed validations.
 
-### 5.1 HL7 v2 ingestion
+### 4.2 FHIR API services (Python)
 
-| ID | Requirement |
-|---|---|
-| FR-1.1 | The system **shall** accept HL7 v2.x messages over MLLP, HTTP, and file-drop transports. |
-| FR-1.2 | The system **shall** parse ADT, ORM, and ORU message types in the initial release. |
-| FR-1.3 | The system **shall** validate incoming messages against HL7 v2 structural rules before transformation. |
-| FR-1.4 | The system **shall** return an ACK for successfully processed messages and a NACK with a structured reason code for rejected ones. |
-| FR-1.5 | The system **shall** route messages to configured downstream targets based on message type and configurable rules. |
-| FR-1.6 | Malformed messages **shall** be persisted to a dead-letter store rather than silently dropped. |
+1. The platform shall expose RESTful FHIR R4/R5 endpoints for core resources: Patient, Encounter, Observation, Condition, Practitioner, Organization, Medication (initial build covers Patient, Encounter, Observation, and Order-derived resources per [DATA_MODEL.md](DATA_MODEL.md); the rest extend the same pattern).
+2. The system shall use a Python FHIR library to represent resources as typed models and validate payloads against the FHIR specification and any custom profiles.
+3. The API shall support CRUD operations and search with common parameters (e.g. `Patient?identifier=`, `Observation?patient=`) for supported resources.
+4. The system shall support versioning and ETag/If-Match semantics for concurrent update control.
+5. The system shall expose SMART-on-FHIR–compatible OAuth 2.0 scopes and launch context **if required by consuming apps** — not committed for the initial build unless a consuming app needs it; see open item in §11.
 
-### 5.2 Canonical transformation
+### 4.3 High-performance validation/transform — future phase (not current build)
 
-| ID | Requirement |
-|---|---|
-| FR-2.1 | The system **shall** transform validated HL7 v2 messages into the canonical data model (see [DATA_MODEL.md](DATA_MODEL.md)). |
-| FR-2.2 | The system **shall** transform canonical model instances into FHIR R4 resources on read, and FHIR R4 resources into canonical model instances on write. |
-| FR-2.3 | Transformation failures **shall** be logged with enough detail (source message ID, failing field, rule) to be diagnosed without re-requesting the source message. |
+Per [ADR-006](DECISIONS.md#adr-006), this section describes the target design for a later phase; none of it is built now.
 
-### 5.3 FHIR API
+1. The solution will include C++ components for high-throughput FHIR/HL7 validation and performance-critical transformation (e.g. batch ingestion, protocol gateways, device data parsing) once that phase is scheduled.
+2. C++ modules will be exposed to Python via native bindings (pybind11, in-process) or gRPC/REST microservices (out-of-process, horizontally scalable) — gRPC is the default per [ADR-002](DECISIONS.md#adr-002).
+3. C++ models will align with the official HL7 FHIR specification's primitive and complex types.
 
-| ID | Requirement |
-|---|---|
-| FR-3.1 | The system **shall** expose FHIR R4 RESTful CRUD endpoints for Patient, Encounter, Observation, and Order-derived resources (ServiceRequest/MedicationRequest as applicable) in the initial release. |
-| FR-3.2 | The system **shall** support FHIR search parameters relevant to each exposed resource type. |
-| FR-3.3 | The system **shall** reject writes that fail FHIR resource validation, returning an `OperationOutcome`. |
-| FR-3.4 | Admin endpoints (routing config, health, metrics) **shall** be separated from clinical data endpoints, both in path namespace and in required authorization scope. |
+### 4.4 Data storage and access
 
-### 5.4 Persistence
+1. The system shall store PHI only in designated HIPAA-aligned database instances with encryption at rest enabled.
+2. The system shall enforce role-based access control and field-level filtering to ensure minimum-necessary disclosure in API response models.
+3. The platform shall maintain logical separation between the production PHI store and de-identified datasets used for analytics, testing, and AI model training — no code path bridges them without an explicit, separately-authorized re-linking service (not in initial scope).
 
-| ID | Requirement |
-|---|---|
-| FR-4.1 | PHI **shall** be stored encrypted at rest, in a store logically and physically separate from the de-identified store. |
-| FR-4.2 | Every read or write of PHI **shall** produce an immutable audit log entry (actor, action, resource, timestamp, outcome). |
-| FR-4.3 | The audit log store **shall** be append-only; no code path may update or delete an existing audit entry. |
-| FR-4.4 | Field-level access control **shall** be enforceable per role (e.g., an Auditor role can see audit metadata but not clinical note text). |
+## 5. HIPAA and security requirements
 
-### 5.5 De-identification
+Full technical-safeguard mapping and rationale in [SECURITY_AND_COMPLIANCE.md](SECURITY_AND_COMPLIANCE.md). Summary of specific controls:
 
-| ID | Requirement |
-|---|---|
-| FR-5.1 | The system **shall** provide a pipeline that produces Safe Harbor de-identified copies of designated resources into the de-identified store. |
-| FR-5.2 | De-identification **shall** strip or generalize all 18 Safe Harbor identifier categories (see [SECURITY_AND_COMPLIANCE.md](SECURITY_AND_COMPLIANCE.md#de-identification)). |
-| FR-5.3 | The de-identified store **shall** have no code path back to re-identification without a separate, explicitly authorized re-linking service (not in initial scope). |
+### 5.1 Access control
 
-### 5.6 Security & identity
+1. All access to PHI-handling APIs shall require strong authentication. Baseline: token-based login (OAuth 2.0/OpenID Connect). **Institutional SSO/SAML federation is an open item — see §11; the original roadmap scoped it out as needing a separate procurement conversation with a real identity provider.**
+2. Authorization shall combine **RBAC** (roles: clinician, admin, integration engine, analytics service) with **ABAC** (attribute-based rules — e.g. patient-specific vs. population-level scope) where role alone is insufficient.
+3. APIs shall implement "minimum necessary" by default — Python response models filter out non-required fields per endpoint/use case, not left to the caller to ignore extra fields.
+4. Automatic logoff/session-expiry shall apply to any interactive session or long-lived token, minimizing exposure from an unattended session.
 
-| ID | Requirement |
-|---|---|
-| FR-6.1 | All API access **shall** require authentication; there is no anonymous access path to clinical endpoints. |
-| FR-6.2 | Authorization **shall** be role-based, enforced centrally rather than per-endpoint ad hoc. |
-| FR-6.3 | Secrets (DB credentials, signing keys, API keys) **shall** be retrieved through a `SecretsProvider` interface, never hardcoded or committed. |
-| FR-6.4 | Rate limiting **shall** apply per client/API-key on the Integration Gateway. |
+### 5.2 Transmission security
 
-### 5.7 Observability
+1. All network communication carrying PHI shall use **TLS 1.2+** with modern cipher suites, over HTTPS.
+2. MLLP-based HL7 channels shall be tunneled over secure VPN or a TLS-enabled channel per enterprise security policy.
+3. Keys and certificates shall be managed centrally via the `KeyManager` interface (Vault reference implementation) — never embedded in config or code.
 
-| ID | Requirement |
-|---|---|
-| FR-7.1 | The system **shall** emit structured logs and OpenTelemetry traces for every message/request processed. |
-| FR-7.2 | Logs and traces **shall not** contain raw PHI field values; only resource identifiers and outcome metadata. |
-| FR-7.3 | The system **shall** expose health and readiness endpoints suitable for container-orchestrator probes. |
+### 5.3 Encryption and data protection
 
-## 6. Non-functional requirements
+1. Databases/storage containing PHI shall use **encryption at rest** — reference: AES-256 disk encryption — with keys managed through `KeyManager`.
+2. Sensitive fields may additionally be encrypted at the application layer for defense in depth on especially high-risk PHI elements.
+3. Backups shall be encrypted and stored in compliant locations with a documented retention policy.
 
-| ID | Requirement |
-|---|---|
-| NFR-1 | Sustain ≥ 50 HL7 msg/s and ≥ 200 FHIR req/s at the assumed default throughput target (§9). **Provisional for the current Python-only build** ([ADR-006](DECISIONS.md#adr-006)) — these numbers were sized assuming a C++ validator; re-benchmark against the actual Python implementation rather than assuming they hold. Horizontal scaling beyond this is a future-phase concern once/if C++ is added. |
-| NFR-2 | FHIR API P95 latency < 300ms under target load. |
-| NFR-3 | No OS-specific code path anywhere in the codebase; C++ platform code isolated behind a single `platform/` shim. |
-| NFR-4 | Every service ships as a multi-arch (`linux/amd64`, `linux/arm64`) container image, buildable and runnable identically under Compose or any Kubernetes distribution. |
-| NFR-5 | No hardcoded cloud-vendor SDK in core business logic; infrastructure dependencies (`KeyManager`, `ObjectStore`, `MessageBus`, DB) sit behind swappable interfaces. |
-| NFR-6 | No telemetry, error reporting, or log sink targets third-party SaaS unless a signed BAA exists and it is explicitly configured — off by default. |
-| NFR-7 | Zero real PHI in source control, test fixtures, CI logs, or this repository at any point (see [ADR-005](DECISIONS.md#adr-005)). |
+### 5.4 Audit logging
 
-## 7. External interfaces
+1. The system shall generate structured audit logs for all PHI operations, capturing: user/service identity, patient/resource identifiers, operation (create/read/update/delete/search), timestamp, and source IP/host.
+2. Audit logs shall be written to an immutable/WORM-capable store (e.g. object-lock storage, append-only DB) with retention aligned to regulatory expectations (commonly 6 years — confirm exact figure with the client's compliance function, not assumed here).
+3. Logging shall be standardized across the codebase (structured logging library), so every component forwards events to the same sink in the same shape.
+4. **AI-assisted anomaly detection over audit logs** is a requested capability. Treated as a **future/optional enhancement**, not initial build scope: if it uses a third-party service, it needs a signed BAA first like any other third-party touching audit metadata ([SECURITY_AND_COMPLIANCE.md §5](SECURITY_AND_COMPLIANCE.md)); a self-hosted anomaly-detection component would not need one. Which approach is wanted is an open item — see §11.
 
-- **HL7 v2 inbound:** MLLP (default port TBD in Phase 0), HTTP POST, file-drop directory watch.
-- **FHIR REST API:** `/fhir/r4/...` per resource, standard FHIR interactions (`read`, `search`, `create`, `update`).
-- **Admin API:** `/admin/...`, separate auth scope from `/fhir/...`.
-- **Metrics/health:** `/healthz`, `/readyz`, `/metrics` (OpenTelemetry/Prometheus-compatible).
+### 5.5 Integrity and validation
 
-## 8. Data requirements
+1. All HL7 v2 and FHIR messages shall be schema-validated before persistence or downstream processing.
+2. The system shall implement checksum/hash-based integrity verification for stored documents or large payloads where appropriate.
+3. Validation errors shall be logged and surfaced through monitoring/alerting, not just swallowed into the dead-letter store silently.
 
-See [DATA_MODEL.md](DATA_MODEL.md) for canonical entities and the HL7 v2 ↔ canonical ↔ FHIR field mapping.
+## 6. Privacy and de-identification
 
-## 9. Constraints & assumptions
+1. The system shall provide configurable de-identification pipelines for:
+   - **Structured data** — Safe Harbor rules (date shifting, geocode generalization, age capping at 89, and the remaining categories in [SECURITY_AND_COMPLIANCE.md §4](SECURITY_AND_COMPLIANCE.md#4-de-identification)). **Initial build scope.**
+   - **Unstructured text** — NER-based de-identification (Presidio-like approach). **Deferred**, per the original roadmap — its own future phase, not initial scope.
+2. De-identified datasets shall be clearly separated from identified PHI stores (see [DATA_MODEL.md](DATA_MODEL.md#data-classification--storage-separation)); any re-identification keys, if ever used, are protected and access-controlled — no re-identification path exists in the initial build.
+3. De-identification configuration shall be versioned and auditable for research/analytics use.
 
-Carried from the source SRS's open-decisions table — defaults assumed so planning isn't blocked, explicitly flagged for override:
+## 7. Non-functional requirements
+
+### 7.1 Performance and scalability
+
+1. The system shall support a defined message throughput and latency target under normal load. Default assumption: ~50 HL7 msg/s, ~200 FHIR req/s, P95 < 300ms (see §11) — **provisional for the Python-only build**; sized originally assuming a C++ validator, so re-benchmark against the actual Python implementation rather than assuming it holds.
+2. Once/if the future C++ phase lands, those services shall be horizontally scalable for CPU-intensive operations, with the Python orchestration layer handling backpressure and rate limiting.
+3. Multi-tenant deployment (logical segregation) is supported **if required** — not committed for the initial build; add if a concrete tenant-isolation need shows up.
+
+### 7.2 Reliability and availability
+
+1. Target availability SLA for core FHIR APIs and HL7 channels: to be set with the client (no figure assumed here — an SLA number implies an operational commitment this document shouldn't invent).
+2. Redundancy with automatic failover for critical services/databases — a later-phase concern per the roadmap's "multi-region/HA" exclusion; noted here so it isn't lost, not committed for the pilot.
+3. A message queue/event stream (Kafka or RabbitMQ, via the `MessageBus` interface) decouples producers/consumers only where a phase actually needs that decoupling — not introduced speculatively.
+
+### 7.3 Observability
+
+1. Centralized logging, metrics, and tracing (OpenTelemetry) across all components.
+2. Health/readiness endpoints for orchestration-platform liveness/readiness probes.
+3. Security and validation failures integrate with a SIEM **if the client has one** — self-hosted/internal by default per [NFR-6](#nonfunctional-hard-constraints); no data leaves to a third-party SIEM without a BAA.
+
+## 8. Technology stack requirements
+
+### 8.1 Python (current build)
+
+- Web framework: **FastAPI**.
+- FHIR: `fhir.resources` and/or `fhirclient`.
+- HL7 v2: `python-hl7` or equivalent.
+- Auth: OAuth 2.0/OpenID Connect client/server libraries.
+- Logging: `structlog` or equivalent, standardized across all modules.
+
+### 8.2 C++ (future phase — not current build)
+
+- FHIR modeling: `fhircpp` or code generated from the official HL7 FHIR specification — evaluated when the phase is actually scheduled, not committed now.
+- gRPC/REST framework for inter-service communication with the Python layer.
+- CMake-based builds, containerized identically to the Python services.
+
+## 9. Compliance, documentation, and governance
+
+1. A data-flow diagram of all PHI ingress, storage, processing, and egress paths shall be maintained and updated as part of the design baseline (living document — update alongside [ARCHITECTURE.md](ARCHITECTURE.md), not a one-time deliverable).
+2. System documentation shall include interface specifications (HL7 v2 + FHIR endpoints), security/privacy design including threat models, and operational runbooks for incident response and breach handling — the runbook is explicitly deferred in the roadmap until the system it describes is stable.
+3. A requirements traceability matrix (HIPAA requirements → technical controls; HL7/FHIR conformance → implemented functionality) is valuable but, per the roadmap, written once the system is stable rather than maintained speculatively during active early-phase churn.
+
+## 10. Implementation and testing requirements
+
+1. **Unit tests** — HL7 v2/FHIR parsing and validation; field-level enforcement of minimum-necessary views in API responses.
+2. **Integration tests** — end-to-end (HL7 v2 ingest → transform → FHIR API exposure → persistence); authN/authZ flows including negative cases.
+3. **Security/compliance testing** — static and dynamic code analysis in CI; third-party penetration testing and audit-log completeness/retention audits are vendor-scheduled and explicitly out of scope for the initial build per the roadmap (shouldn't touch real PHI without a BAA regardless).
+4. All test fixtures are synthetic, no exceptions — [ADR-005](DECISIONS.md#adr-005).
+
+## 11. Open items and conflicts — not silently resolved
+
+| # | Item | Why it's open |
+|---|---|---|
+| 1 | **SSO/SAML institutional federation** (§5.1) | This SRS requires it; the original roadmap explicitly scoped full OAuth2/OIDC+SAML SSO federation **out** of the initial build as needing a separate procurement conversation with a real IdP. Baseline OAuth2/OIDC token auth is in scope either way — the open question is whether full SAML federation is needed for the pilot or deferred as originally planned. |
+| 2 | **AI-assisted audit-log anomaly detection** (§5.4) | Requested capability, not yet scoped as self-hosted vs. third-party. Third-party requires a BAA first. |
+| 3 | **Build track** | 8-week vs. 12-week AI-orchestrated timeline — default assumed 12-week, unconfirmed. |
+| 4 | **Availability SLA figure** (§7.2) | No number invented here; needs a client-side commitment. |
+| 5 | **Audit-log retention period** (§5.4.2) | "6 years" used as a common reference point, not confirmed against the client's actual regulatory obligation. |
+
+## 12. Constraints and assumptions
 
 | Assumption | Default | Status |
 |---|---|---|
 | Deployment target | Container-first, any Kubernetes distro or Compose on-prem | Assumed |
 | EHR vendors | Generic HL7 v2.x + FHIR R4, no vendor-specific profiles yet | Assumed |
-| Throughput | ~50 msg/s HL7, ~200 req/s FHIR, P95 < 300ms | Assumed |
+| Throughput | ~50 msg/s HL7, ~200 req/s FHIR, P95 < 300ms | Assumed, provisional (see §7.1) |
 | Team size | 1–2 senior engineers + part-time security review | Assumed |
-| **Build track** | **12-week AI-orchestrated track** (see roadmap) | **Assumed, pending your confirmation** |
-| **PHI in dev/test** | **Synthetic data only, no exceptions** | **Assumed as a hard rule regardless of confirmation** |
-| **Implementation language** | **Python-only for the current build; C++ is a future implementation pipeline** | **Confirmed 2026-08-24 — see [ADR-006](DECISIONS.md#adr-006)** |
-
-## 10. Acceptance criteria (by phase)
-
-High-level; detailed per-phase acceptance criteria will be written at the start of each phase against the code that phase actually produces, not speculatively now. Phase 0 acceptance = repo scaffold + canonical model reviewed and signed off by you. Later phases build on that pattern: each phase ends with a demo-able increment plus tests proving the requirements it claims to satisfy.
+| Implementation language | **Python-only for current build; C++ is a future implementation pipeline** | **Confirmed 2026-08-24 — [ADR-006](DECISIONS.md#adr-006)** |
+| PHI in dev/test | Synthetic data only, no exceptions | Hard rule, non-negotiable |

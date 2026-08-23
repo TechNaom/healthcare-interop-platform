@@ -31,4 +31,4 @@ Full detail in [docs/SECURITY_AND_COMPLIANCE.md](docs/SECURITY_AND_COMPLIANCE.md
 
 Read in this order: this README → `Healthcare Interop Platform.md` (roadmap/status) → `docs/SRS.md` → `docs/ARCHITECTURE.md` → `docs/DATA_MODEL.md` → `docs/DESIGN.md` → `docs/SECURITY_AND_COMPLIANCE.md`. `docs/DECISIONS.md` and `docs/GLOSSARY.md` are reference, read as needed.
 
-Nothing here is speculative beyond what's marked "assumed" — every assumption is listed in [SRS §9](docs/SRS.md#9-constraints--assumptions) with its default and rationale, so picking this up mid-flight means checking that table first, not re-deriving intent from code.
+Nothing here is speculative beyond what's marked "assumed" — every assumption is listed in [SRS §12](docs/SRS.md#12-constraints-and-assumptions) with its default and rationale, and every unresolved conflict is in [SRS §11](docs/SRS.md#11-open-items-and-conflicts--not-silently-resolved), so picking this up mid-flight means checking those two tables first, not re-deriving intent from code.

@@ -19,3 +19,10 @@
 | **OpenTelemetry** | Vendor-neutral observability standard for traces, metrics, and logs. |
 | **KeyManager / SecretsProvider / ObjectStore** | This project's pluggable infrastructure interfaces — see [DESIGN.md §5](DESIGN.md#5-pluggable-infrastructure--interface-shapes). |
 | **De-identified store** | A separate data store holding Safe Harbor de-identified copies of records, used for analytics/AI with no path back to PHI. |
+| **RBAC** | Role-Based Access Control — permissions attach to roles, not individual users. |
+| **ABAC** | Attribute-Based Access Control — permissions evaluated from attributes of the request (e.g. "this clinician, this patient population"), used alongside RBAC where role alone can't express the rule. |
+| **WORM** | Write Once, Read Many — storage that can't be modified or deleted after write; used for the audit log. |
+| **KMS** | Key Management System — centralized management of encryption keys and certificates; this project's `KeyManager` interface, Vault by default. |
+| **SIEM** | Security Information and Event Management — a system that aggregates and analyzes security event data; self-hosted/internal by default here, no third-party SIEM without a BAA. |
+| **SMART on FHIR** | A standard for OAuth 2.0-based app authorization launched in a FHIR context (scopes, launch context) — relevant only if a consuming app requires app-launch semantics beyond baseline API auth. |
+

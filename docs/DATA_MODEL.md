@@ -8,7 +8,7 @@ HL7 v2 and FHIR R4/R5 both map to and from one internal representation, instead 
 
 ## Core entities — initial scope
 
-Scoped to what ADT, ORM, and ORU actually carry, per [SRS FR-1.2](SRS.md#51-hl7-v2-ingestion).
+Scoped to what ADT, ORM, and ORU actually carry, per [SRS §4.1](SRS.md#41-hl7-v2-message-handling).
 
 ### Patient
 
@@ -74,6 +74,6 @@ Every canonical entity instance is written to exactly one of three stores (never
 
 ## What's explicitly deferred
 
-- Full FHIR R4 resource coverage beyond Patient/Encounter/ServiceRequest/Observation — later hardening, once vendor-specific quirks are known (per [SRS §9](SRS.md#9-constraints--assumptions), EHR vendor is currently a generic assumption).
+- Full FHIR R4 resource coverage beyond Patient/Encounter/ServiceRequest/Observation — later hardening, once vendor-specific quirks are known (per [SRS §12](SRS.md#12-constraints-and-assumptions), EHR vendor is currently a generic assumption).
 - FHIR R5-specific field differences — R5 support is a target, but the mapping table above is written against R4 first since that's the dominant deployed version.
 - Local Z-segment handling — vendor-specific, deferred with the vendor-profile assumption.

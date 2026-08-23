@@ -117,7 +117,7 @@ No `.proto` contracts or bindings exist yet, and won't until the C++ phase is ac
 6. De-identification service asynchronously produces a Safe Harbor copy into the de-identified store.
 7. A FHIR client later `GET`s the resource; Gateway authenticates/authorizes, reads canonical instance, maps canonical → FHIR R4, returns it.
 
-Every arrow in this flow is covered by a functional requirement in [SRS.md §5](SRS.md#5-functional-requirements).
+Every arrow in this flow is covered by a functional requirement in [SRS.md §4](SRS.md#4-functional-requirements).
 
 ## 7. What's deliberately not decided here
 
