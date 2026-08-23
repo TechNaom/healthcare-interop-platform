@@ -12,6 +12,7 @@ Every document below is written and internally consistent. No source code exists
 |---|---|
 | [Healthcare Interop Platform.md](<Healthcare Interop Platform.md>) | Original SRS summary, phased roadmap (full-scope + 8-week/12-week AI-orchestrated tracks), hard constraints |
 | [docs/SRS.md](docs/SRS.md) | Formal requirements — functional (FR-*), non-functional (NFR-*), external interfaces, assumptions |
+| [docs/TECHNOLOGY_MAPPING.md](docs/TECHNOLOGY_MAPPING.md) | One-page answer to "for this requirement, what are we actually using" — every SRS section mapped to a concrete technology choice |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Component diagram, deployment view, technology stack, Python↔C++ boundary |
 | [docs/DESIGN.md](docs/DESIGN.md) | Module breakdown, sequence diagrams, error handling, pluggable-infrastructure interfaces |
 | [docs/DATA_MODEL.md](docs/DATA_MODEL.md) | Canonical model entities and the HL7 v2 ↔ canonical ↔ FHIR field mapping |
