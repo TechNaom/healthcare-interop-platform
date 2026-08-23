@@ -17,6 +17,7 @@ Every document below is written and internally consistent. No source code exists
 | [docs/DESIGN.md](docs/DESIGN.md) | Module breakdown, sequence diagrams, error handling, pluggable-infrastructure interfaces |
 | [docs/DATA_MODEL.md](docs/DATA_MODEL.md) | Canonical model entities and the HL7 v2 ↔ canonical ↔ FHIR field mapping |
 | [docs/SECURITY_AND_COMPLIANCE.md](docs/SECURITY_AND_COMPLIANCE.md) | HIPAA technical-safeguards mapping, encryption, RBAC roles, de-identification, BAA policy |
+| [docs/TEST_STRATEGY.md](docs/TEST_STRATEGY.md) | Where test data comes from (synthetic only), how it's loaded, test pyramid, compliance tests, environments |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | ADR log — the *why* behind every major choice |
 | [docs/GLOSSARY.md](docs/GLOSSARY.md) | HL7/FHIR/HIPAA terms used throughout |
 
