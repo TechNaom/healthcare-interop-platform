@@ -1,0 +1,48 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.coverage
+htmlcov/
+
+# --- C++ ---
+build/
+cmake-build-*/
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
+*.exe
+CMakeFiles/
+CMakeCache.txt
+
+# --- Containers / infra ---
+*.env
+.env.*
+!.env.example
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Secrets & credentials (never commit) ---
+*.pem
+*.key
+*secret*
+*credentials*
+
+# --- PHI / patient data — hard rule, not a suggestion ---
+# No real patient data should ever exist in this repo. Synthetic
+# fixtures only. If a file looks like it might contain real PHI,
+# it does not belong here regardless of what this pattern misses.
+*.phi
+/data/real/
+/data/patients/
