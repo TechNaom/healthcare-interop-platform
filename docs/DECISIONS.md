@@ -76,3 +76,15 @@ Short-form ADRs — Status / Context / Decision / Consequences. New decisions ge
 - Throughput targets (~50 msg/s HL7, ~200 req/s FHIR, P95 < 300ms) were sized assuming a C++ validator. They are **provisional** for the Python-only build and should be re-benchmarked against the actual Python implementation rather than assumed — see [SRS §7.1](SRS.md#71-performance-and-scalability).
 - The roadmap's Phase 4 ("C++ high-performance services") moves from "later hardening" to "future phase, not currently scheduled" — it stays in the plan as a documented future pipeline, not deleted.
 - [ADR-002](#adr-002) (gRPC default, pybind11 fallback) is not reversed, only deferred — it's the design to reach for when/if the C++ phase actually starts.
+
+---
+
+## ADR-007: GitHub Actions for CI, on the private repo
+
+**Status:** Accepted, 2026-08-24
+
+**Context:** The original SRS default was self-hosted/local CI, driven by the "no external CI/SaaS without sign-off" confidentiality constraint. Source control itself was later moved to a private GitHub repo ([ADR-004](#adr-004)), which already accepted GitHub as a trusted party for code storage. The remaining question was whether CI execution should extend that same trust (GitHub-hosted runners) or stay stricter (self-hosted runner, code never executes on GitHub-owned infrastructure).
+
+**Decision:** Use GitHub Actions on GitHub-hosted runners for this private repo's CI (build, test, lint/static analysis per [SRS §10.3](SRS.md#10-implementation-and-testing-requirements)).
+
+**Consequences:** No extra infrastructure to stand up or maintain. CI logs and build output live on GitHub's infrastructure during runs, same trust boundary already accepted for source storage. The synthetic-data-only rule ([ADR-005](#adr-005)) is what makes this safe — CI never has real PHI to leak in the first place, so the added exposure from GitHub-hosted runners is minimal. If real PHI processing ever needs to run through CI (e.g. a future compliance-hardening phase), revisit this decision before that happens — it would need a signed BAA with GitHub or a move to a self-hosted runner, not an assumption that this ADR still applies.
