@@ -18,7 +18,7 @@ Short-form ADRs — Status / Context / Decision / Consequences. New decisions ge
 
 ## ADR-002: gRPC as default Python↔C++ boundary, pybind11 as measured fallback
 
-**Status:** Accepted
+**Status:** Deferred — see [ADR-006](#adr-006). This decision still stands for whenever the C++ phase begins; it does not apply to the current Python-only build.
 
 **Context:** Python owns orchestration/API surface; C++ owns high-throughput validation/transform. They need a boundary. gRPC keeps them as independent, separately-scalable processes; pybind11 gives lower latency but couples deployment/build lifecycles.
 
@@ -61,3 +61,18 @@ Short-form ADRs — Status / Context / Decision / Consequences. New decisions ge
 **Decision:** No real patient data enters this repository, any test fixture, any chat session, or any log at any point in this engagement, without exception. All development, demo, and test data is synthetic.
 
 **Consequences:** Some edge cases that only show up with messy real-world data (vendor quirks, malformed real messages) won't surface until a later phase explicitly scoped for that, with a BAA in place first. This is treated as acceptable — see roadmap's "out of scope" rationale for vendor-specific hardening.
+
+---
+
+## ADR-006: Python-only for initial build; C++ deferred to a future phase
+
+**Status:** Accepted, 2026-08-24
+
+**Context:** The original SRS specified Python for orchestration/API and C++ for high-throughput validation/transform, connected via gRPC ([ADR-002](#adr-002)). The client revised scope: build Python-only for now; C++ is a future implementation pipeline, not part of the current build.
+
+**Decision:** The Messaging Engine's validation/transform responsibility is implemented entirely in Python for the initial build. The architecture keeps that responsibility in its own module/service boundary (not entangled with routing or the FHIR API layer) specifically so a C++ implementation can be swapped in later behind the same gRPC contract from [ADR-002](#adr-002) without a redesign — the seam is designed in from the start even though the C++ side of it isn't built now.
+
+**Consequences:**
+- NFR-1's throughput targets (~50 msg/s HL7, ~200 req/s FHIR, P95 < 300ms) were sized assuming a C++ validator. They are **provisional** for the Python-only build and should be re-benchmarked against the actual Python implementation rather than assumed — see [SRS §9](SRS.md#9-constraints--assumptions).
+- The roadmap's Phase 4 ("C++ high-performance services") moves from "later hardening" to "future phase, not currently scheduled" — it stays in the plan as a documented future pipeline, not deleted.
+- [ADR-002](#adr-002) (gRPC default, pybind11 fallback) is not reversed, only deferred — it's the design to reach for when/if the C++ phase actually starts.

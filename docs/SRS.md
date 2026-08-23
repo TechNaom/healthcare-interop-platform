@@ -102,7 +102,7 @@ Four layers — Integration Gateway, Messaging Engine, Persistence, Security & C
 
 | ID | Requirement |
 |---|---|
-| NFR-1 | Sustain ≥ 50 HL7 msg/s and ≥ 200 FHIR req/s at the assumed default throughput target (§9), horizontally scalable beyond that via added C++ service instances. |
+| NFR-1 | Sustain ≥ 50 HL7 msg/s and ≥ 200 FHIR req/s at the assumed default throughput target (§9). **Provisional for the current Python-only build** ([ADR-006](DECISIONS.md#adr-006)) — these numbers were sized assuming a C++ validator; re-benchmark against the actual Python implementation rather than assuming they hold. Horizontal scaling beyond this is a future-phase concern once/if C++ is added. |
 | NFR-2 | FHIR API P95 latency < 300ms under target load. |
 | NFR-3 | No OS-specific code path anywhere in the codebase; C++ platform code isolated behind a single `platform/` shim. |
 | NFR-4 | Every service ships as a multi-arch (`linux/amd64`, `linux/arm64`) container image, buildable and runnable identically under Compose or any Kubernetes distribution. |
@@ -133,6 +133,7 @@ Carried from the source SRS's open-decisions table — defaults assumed so plann
 | Team size | 1–2 senior engineers + part-time security review | Assumed |
 | **Build track** | **12-week AI-orchestrated track** (see roadmap) | **Assumed, pending your confirmation** |
 | **PHI in dev/test** | **Synthetic data only, no exceptions** | **Assumed as a hard rule regardless of confirmation** |
+| **Implementation language** | **Python-only for the current build; C++ is a future implementation pipeline** | **Confirmed 2026-08-24 — see [ADR-006](DECISIONS.md#adr-006)** |
 
 ## 10. Acceptance criteria (by phase)
 

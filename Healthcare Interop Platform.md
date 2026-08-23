@@ -8,6 +8,7 @@ A HIPAA-aligned HL7 v2 + FHIR (R4/R5) data integration platform. Python handles 
 | **Plan status** | Draft — four scoping assumptions pending sign-off |
 | **Consolidated from** | `IMPLEMENTATION_PLAN.md`, `ARCHITECTURE.md`, `ROADMAP_2MONTH.md`, `ROADMAP_3MONTH.md` |
 | **Kickoff track decision** | Pending — see [Open Questions](#open-questions-from-kickoff-review) |
+| **Scope amendment, 2026-08-24** | Python-only for the current build; C++ (Phase 4 below) is a future implementation pipeline, not scheduled now. Full detail in [docs/DECISIONS.md — ADR-006](docs/DECISIONS.md#adr-006). |
 
 ---
 

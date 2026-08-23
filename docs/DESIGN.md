@@ -21,7 +21,7 @@
 | `messaging.hl7.parser` | Python | Structural parse, segment extraction |
 | `messaging.hl7.router` | Python | Routes by message type / configured rules |
 | `messaging.canonical.mapper` | Python | HL7 v2 ↔ canonical ↔ FHIR mapping (data in [DATA_MODEL.md](DATA_MODEL.md)) |
-| `validator` (separate service) | C++ | High-throughput structural + terminology validation, transform |
+| `messaging.validator` | Python | Structural + terminology validation, transform. In-process for now; kept as its own module so a future C++ service can replace it behind the same call boundary without touching callers ([ADR-006](DECISIONS.md#adr-006)) — **C++ is a future implementation pipeline, not current scope.** |
 
 ### Persistence
 
@@ -47,7 +47,7 @@ sequenceDiagram
     participant EHR
     participant Listener as HL7 Listener
     participant Parser
-    participant Validator as C++ Validator
+    participant Validator as Validator (Python)
     participant Mapper as Canonical Mapper
     participant PHI as PHI Store
     participant Audit as Audit Log
@@ -55,7 +55,7 @@ sequenceDiagram
 
     EHR->>Listener: HL7 v2 ADT (MLLP)
     Listener->>Parser: raw message
-    Parser->>Validator: structural check (gRPC)
+    Parser->>Validator: structural check (in-process call)
     Validator-->>Parser: valid / errors
     alt invalid
         Parser-->>Listener: NACK + reason

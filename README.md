@@ -1,6 +1,6 @@
 # Healthcare Interoperability Platform
 
-A HIPAA-aligned HL7 v2 + FHIR (R4/R5) data integration platform. Python for orchestration and the API surface, C++ for high-throughput validation and transform, containers as the deployable unit on any OS or cloud.
+A HIPAA-aligned HL7 v2 + FHIR (R4/R5) data integration platform. **Python-only for the current build** — orchestration, API surface, and validation/transform. C++ high-throughput validation is a documented future phase, not current scope (see [ADR-006](docs/DECISIONS.md#adr-006)). Containers as the deployable unit on any OS or cloud.
 
 ## Status: Planning complete — build not started
 
