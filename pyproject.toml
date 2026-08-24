@@ -6,11 +6,14 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { text = "UNLICENSED" }
 
-# Runtime dependencies are intentionally empty at Phase 0 — the scaffold imports
-# only stdlib. Each layer's real dependencies (fastapi, fhir.resources,
-# sqlalchemy, python-hl7, structlog, ...) get added in the phase that builds it,
-# so the lockfile grows with actual usage rather than speculatively.
-dependencies = []
+# Runtime deps grow with each layer, not speculatively (docs/TECH_STACK.md).
+# Phase 1 adds the Gateway (FastAPI) and the canonical model (Pydantic v2).
+# Still to come per phase: fhir.resources, python-hl7, sqlalchemy, structlog, ...
+dependencies = [
+    "fastapi>=0.115",
+    "pydantic>=2.9",
+    "uvicorn[standard]>=0.30",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -20,6 +23,7 @@ dev = [
     "pytest>=8.3",
     "pytest-cov>=5.0",
     "pre-commit>=3.8",
+    "httpx>=0.27",
 ]
 # Performance/load tooling — kept out of the default dev set so a normal
 # `uv sync --extra dev` stays fast. Install with `uv sync --extra perf` in the
@@ -64,6 +68,11 @@ testpaths = ["tests"]
 # and avoids duplicate-basename import clashes across tiers.
 addopts = "-ra --strict-markers --import-mode=importlib"
 pythonpath = ["src"]
+filterwarnings = [
+    # Starlette's TestClient warns about httpx; not actionable for us and just noise.
+    "ignore:Using `httpx` with `starlette.testclient`:UserWarning",
+    "ignore::DeprecationWarning:starlette.testclient",
+]
 markers = [
     "unit: fast, in-process, no external I/O. Runs on every push/PR.",
     "integration: exercises 2+ components against real containers (testcontainers). Every PR.",
