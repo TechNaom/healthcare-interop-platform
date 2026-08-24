@@ -58,14 +58,32 @@ Consequences worth noting: seeding is slower this way, and it *can fail* — whi
 
 ## 3. Test pyramid
 
-| Level | Scope | Runs against | Speed |
-|---|---|---|---|
-| **Unit** | One module — parsers, mappers, de-id rules, RBAC decisions | In-process, no I/O | Milliseconds |
-| **Integration** | Two or more components — ingestion → canonical → persistence | Real Postgres + Keycloak in containers | Seconds |
-| **End-to-end** | Full stack, real transports | Complete Compose stack | Minutes |
-| **Load** | Throughput/latency vs. [SRS §7.1](SRS.md#71-performance-and-scalability) targets | Full stack, generated volume | Long-running, not per-commit |
+| Level | Scope | Runs against | Speed | Marker |
+|---|---|---|---|---|
+| **Unit** | One module — parsers, mappers, de-id rules, RBAC decisions | In-process, no I/O | Milliseconds | `unit` |
+| **Integration** | Two or more components — ingestion → canonical → persistence | Real Postgres + Keycloak in containers | Seconds | `integration` |
+| **End-to-end** | Full stack, real transports | Complete Compose stack | Minutes | `e2e` |
+| **Regression** | Locks previously-shipped behavior against silent change | In-process + golden files | Fast | `regression` |
+| **Performance** | Throughput/latency vs. [SRS §7.1](SRS.md#71-performance-and-scalability) targets | Full stack, generated volume | Long-running, not per-commit | `performance` |
+| **UAT** | Acceptance scenarios through public interfaces ([UAT_PLAN.md](UAT_PLAN.md)) | Release-candidate stack | Minutes | `uat` |
 
 Integration and E2E use **real containerized dependencies** (Postgres, Keycloak, Vault, MinIO) rather than mocks. Mocking a database hides exactly the class of bug — transaction boundaries, constraint violations, permission enforcement — that matters most here. [Testcontainers](https://testcontainers.com/) manages container lifecycle from within the test run.
+
+Tests live under `tests/<tier>/` and carry the marker above (registered in `pyproject.toml`, enforced by `--strict-markers`). Selection is by marker, so the same suite serves the per-PR gate and the scheduled/release gates:
+
+```
+uv run pytest -m "not performance and not uat"   # per-PR (unit, integration, e2e, regression, compliance)
+uv run pytest -m performance                       # scheduled perf job
+uv run pytest -m uat                               # release-candidate UAT
+```
+
+### Regression tier
+
+Every behavior we ship gets a lock so it can't change silently. The first, live from Phase 0, is a **module-surface golden test** (`tests/regression/test_module_surface.py`) that fails if a public `hip` module vanishes without the golden file being updated in the same change. As real behavior lands, regression grows **golden-output** tests: a fixed input (a specific HL7 message, a canonical record) is mapped/serialized and compared byte-for-byte against a reviewed expected output, so an unintended change to a mapping or FHIR shape fails in review rather than in production. Golden files are updated **deliberately** (a reviewed diff), never blindly.
+
+### UAT tier
+
+User-acceptance scenarios are defined up front in [UAT_PLAN.md](UAT_PLAN.md) (UAT-01…UAT-08), each automated in `tests/uat/` and each requiring a human sign-off in addition to a passing test. UAT is a **release-candidate gate**, not a per-PR check, and runs only on synthetic data.
 
 ### The end-to-end test that matters most
 
@@ -138,7 +156,35 @@ Each phase ends with tests proving the requirements it claims, not just working 
 | De-identification | All 18 Safe Harbor categories verified absent |
 | Observability | No-PHI-in-logs test passing under a full workload |
 
-## 8. Open questions
+## 8. Testing at every sprint — cadence matrix
+
+Testing is not a phase; it runs **every sprint**. The four types the client asked
+for map onto the 12-week track as follows. "New" = write tests for this sprint's
+feature; "Grow" = extend the golden/scenario set; "Run" = execute an existing
+suite as a gate. Unit + regression run on **every PR**; performance is
+**scheduled**; UAT is a **release-candidate** gate that also gets a rehearsal at
+mid-point and demo.
+
+| Sprint (wk) | Focus | Unit | Regression | Performance | UAT |
+|---|---|---|---|---|---|
+| 1 — Foundations | scaffold, CI, tiers | Structure/import smoke (live) | Module-surface golden (live) | Harness + locust skeleton wired | Plan authored ([UAT_PLAN.md](UAT_PLAN.md)); tests stubbed |
+| 2 — Canonical model | mapping tables | **New**: field-map + round-trip property tests | **Grow**: golden canonical records | — (no runtime yet) | UAT-01/03/04 criteria pinned to mappings |
+| 3 — Skeletons | FastAPI app, health | **New**: app factory, `/healthz` `/readyz` | **Grow**: health contract golden | **Run**: baseline latency on health | UAT-08 (stack stands up) first pass |
+| 4–5 — HL7 ingestion | MLLP/parse/route/ACK | **New**: parser, router, ACK/NACK per edge case | **Grow**: golden NACK reasons per malformed class | **Run**: ingest throughput vs ~50 msg/s | UAT-06 (safe degradation) automated |
+| 6 — HL7→FHIR + CRUD | mapper + FHIR core | **New**: mapper, CRUD handlers | **Grow**: golden FHIR resource shapes | **Run**: FHIR read/write P95 < 300ms | UAT-01/03/04 executable |
+| 7 — FHIR completeness | search, concurrency | **New**: search params, ETag/If-Match | **Grow**: search-result goldens | **Run**: ~200 req/s FHIR sustained | UAT-03 full |
+| 8 — Validator hardening | validation/transform | **New**: terminology/structural cases | **Grow**: validation-outcome goldens | **Run**: validation overhead measured | — |
+| 9 — Persistence & security | RBAC, audit, keys | **New**: RBAC decisions, repo logic; **compliance** suite (§4) | **Grow**: audit-shape goldens | **Run**: write path under load | UAT-05/07 automated |
+| 10 — De-id + observability | Safe Harbor, OTel | **New**: 18-category de-id, no-PHI-in-logs | **Grow**: de-id output goldens | **Run**: de-id pipeline throughput | UAT-02 automated |
+| 11 — Integration + buffer | end-to-end | Fill gaps | **Full regression run** | **Full load run** on a representative host | Full UAT dry run + fixes |
+| 12 — Stabilization | demo, retro | Green everywhere | **Release regression gate** | **Release perf sign-off** vs SRS §7.1 | **Release UAT sign-off** (human + automated) |
+
+**Gates, concretely:**
+- **Every PR** — `pytest -m "not performance and not uat"` (unit, integration, e2e, regression, compliance) + ruff + mypy + bandit + gitleaks must pass. Coverage tracked, not yet ratcheted while stubs dominate.
+- **Nightly / scheduled** — `pytest -m performance` against a running stack; perf numbers are **provisional for the Python-only build** ([ADR-006](DECISIONS.md#adr-006)) and re-benchmarked, not assumed. See [performance workflow](../.github/workflows/performance.yml).
+- **Release candidate** — full suite including `-m uat`, plus the human sign-off table in [UAT_PLAN.md](UAT_PLAN.md). A candidate ships only when every applicable UAT row is checked **and** signed.
+
+## 9. Open questions
 
 1. **Load-test target environment** — [SRS §7.1](SRS.md#71-performance-and-scalability) throughput figures are provisional for a Python-only build ([ADR-006](DECISIONS.md#adr-006)). Benchmarking on a developer laptop won't predict production; a representative host is needed before those numbers mean anything.
 2. **Client pilot data** — whether the pilot runs on synthetic data (no BAA needed, and sufficient to demonstrate the system) or real PHI (BAA + risk assessment first). Worth settling early, since it determines whether the pilot is an engineering milestone or a compliance project.

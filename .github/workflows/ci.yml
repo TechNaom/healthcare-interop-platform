@@ -42,8 +42,8 @@ jobs:
       - name: bandit
         run: uv run bandit -c pyproject.toml -r src
 
-      - name: pytest
-        run: uv run pytest --cov
+      - name: pytest (unit, integration, e2e, regression, compliance — not perf/uat)
+        run: uv run pytest -m "not performance and not uat" --cov
 
   secret-scan:
     runs-on: ubuntu-latest

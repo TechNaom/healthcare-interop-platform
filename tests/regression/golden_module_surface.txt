@@ -1,0 +1,29 @@
+# Golden module surface for the `hip` package (regression guard).
+# Update deliberately when modules are intentionally added/removed.
+# Regenerate: uv run python -m tests.regression.test_module_surface --update
+hip
+hip.gateway
+hip.gateway.api
+hip.gateway.api.admin
+hip.gateway.api.fhir
+hip.gateway.auth
+hip.gateway.ratelimit
+hip.messaging
+hip.messaging.canonical
+hip.messaging.canonical.mapper
+hip.messaging.hl7
+hip.messaging.hl7.listener
+hip.messaging.hl7.parser
+hip.messaging.hl7.router
+hip.messaging.validator
+hip.persistence
+hip.persistence.audit_log
+hip.persistence.deid_repo
+hip.persistence.phi_repo
+hip.platform
+hip.platform.paths
+hip.security
+hip.security.deid
+hip.security.keymanager
+hip.security.objectstore
+hip.security.secrets

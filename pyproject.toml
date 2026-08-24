@@ -21,6 +21,12 @@ dev = [
     "pytest-cov>=5.0",
     "pre-commit>=3.8",
 ]
+# Performance/load tooling — kept out of the default dev set so a normal
+# `uv sync --extra dev` stays fast. Install with `uv sync --extra perf` in the
+# scheduled performance job (see .github/workflows/performance.yml).
+perf = [
+    "locust>=2.31",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -54,8 +60,20 @@ warn_unused_configs = true
 # --- pytest -------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers"
+# import-mode=importlib lets the tiered tests/ subdirs work without __init__.py
+# and avoids duplicate-basename import clashes across tiers.
+addopts = "-ra --strict-markers --import-mode=importlib"
 pythonpath = ["src"]
+markers = [
+    "unit: fast, in-process, no external I/O. Runs on every push/PR.",
+    "integration: exercises 2+ components against real containers (testcontainers). Every PR.",
+    "e2e: full stack over real transports via Compose. Every PR (slower).",
+    "regression: locks previously-shipped behavior against silent change. Every PR + release.",
+    "performance: throughput/latency vs SRS 7.1 targets (locust/benchmarks). Scheduled, not per-PR.",
+    "uat: user-acceptance scenarios from docs/UAT_PLAN.md. Release-candidate gate.",
+    "compliance: HIPAA claims (audit, de-id, no-PHI-in-logs, RBAC). Every PR once applicable.",
+    "slow: long-running; opt-in locally.",
+]
 
 # --- coverage -----------------------------------------------------------
 [tool.coverage.run]

@@ -80,8 +80,25 @@ src/hip/
   validator.py
   persistence/  phi_repo, audit_log, deid_repo               → hip.persistence
   security/     keymanager, secrets, objectstore, deid       → hip.security
-tests/          test_scaffold.py (import/health smoke tests)
+tests/          tiered by test type, selected via pytest markers
+  unit/         fast in-process (scaffold smoke live)         -m unit
+  integration/  2+ components vs testcontainers               -m integration
+  regression/   module-surface golden (live) + future goldens -m regression
+  performance/  locustfile + SRS 7.1 targets                  -m performance
+  uat/          acceptance scenarios (docs/UAT_PLAN.md)        -m uat
 ```
+
+## Testing (every sprint — see [docs/TEST_STRATEGY.md](docs/TEST_STRATEGY.md) section 8)
+
+Four types run on a defined cadence, not as a one-off phase:
+- **Unit + regression** — every PR (`pytest -m "not performance and not uat"`).
+  Regression is live now via a module-surface golden test.
+- **Performance** — scheduled ([.github/workflows/performance.yml](.github/workflows/performance.yml)),
+  skips cleanly until endpoints exist; targets are provisional (ADR-006).
+- **UAT** — release-candidate gate; 8 scenarios defined in
+  [docs/UAT_PLAN.md](docs/UAT_PLAN.md), each automated + human sign-off.
+The per-sprint matrix (which tests are written/grown/run each week) is in
+TEST_STRATEGY.md section 8.
 
 ## Toolchain status (2026-08-24)
 

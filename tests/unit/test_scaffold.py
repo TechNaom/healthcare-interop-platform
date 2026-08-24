@@ -11,6 +11,8 @@ import importlib
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 # Every module in the scaffold. If one fails to import, the scaffold is broken.
 SCAFFOLD_MODULES = [
     "hip",
