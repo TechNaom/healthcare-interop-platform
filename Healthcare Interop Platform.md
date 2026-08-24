@@ -171,7 +171,7 @@ Not cut for being unimportant — cut because each is gated by something outside
 
 Carried into every future session on this project.
 
-- **Confidential, local-only** — No git remote added on purpose. No pushing to external hosts, no external CI/SaaS (scanners, telemetry, error reporting) without explicit sign-off.
+- **Confidential** — Private GitHub remote (`TechNaom/healthcare-interop-platform`) is the source of truth as of 2026-08-24. No external CI/SaaS (scanners, telemetry, error reporting) without explicit sign-off.
 - **Platform-agnostic** — No OS-specific code paths, no cloud-vendor SDK hardcoded into core logic. Containers as the deployment unit, always.
 - **PHI handling** — Anything touching real patient data needs a BAA in place before it goes near a third-party service, including AI code review tools, SaaS linters, and cloud NLP APIs. Default to self-hosted equivalents. **All development and test fixtures use synthetic data only — no real PHI enters this repo or this chat.**
 
@@ -179,10 +179,12 @@ Carried into every future session on this project.
 
 ## Open questions from kickoff review
 
-Raised 2026-08-24, not yet answered — blocking the start of Phase 0.
+Raised 2026-08-24, answered 2026-08-24.
 
-1. **Track: 8-week or 12-week?** The full-scope plan assumes 1–2 senior engineers at ~40 hrs/week; the compressed tracks assume Claude doing the bulk of implementation with continuous human review. These are different staffing models — worth being explicit with the client about what review cadence their side commits to, since that's the actual bottleneck on the 8-week track.
-2. **Synthetic data only, confirmed?** Per the PHI handling constraint above — no real patient data should enter this repo, test fixtures, sample HL7 messages, or chat at any point.
-3. **Is anything beyond this document itself confidential?** Vendor names, network topology, or credentials that shouldn't be pasted into this session.
+1. **Track: 8-week or 12-week?** → **12-week track** chosen — built-in buffer for the canonical model review and one bad week elsewhere.
+2. **Synthetic data only, confirmed?** → **Confirmed.** No real patient data enters this repo, test fixtures, sample HL7 messages, or chat at any point.
+3. **Is anything beyond this document itself confidential?** → Superseded by the git-remote question below; no other confidential material flagged.
 
-**Proposed first deliverable**, pending answers above: repo scaffold (containers, multi-arch CI config kept local, pre-commit hooks, `platform/` shim layout) plus a written canonical model spec covering **Patient, Encounter, Observation, Order** — the four resources that carry ADT/ORM/ORU — with HL7 v2 ↔ canonical ↔ FHIR R4 mappings laid out for review before any parser exists.
+**Resolved separately:** the repo is now hosted on a private GitHub remote (`TechNaom/healthcare-interop-platform`), superseding the earlier "no git remote, local-only" constraint — see updated Hard constraints above.
+
+**Next up:** repo scaffold (containers, multi-arch CI config kept local, pre-commit hooks, `platform/` shim layout) plus a written canonical model spec covering **Patient, Encounter, Observation, Order** — the four resources that carry ADT/ORM/ORU — with HL7 v2 ↔ canonical ↔ FHIR R4 mappings laid out for review before any parser exists (Week 1–2 of the 12-week track).

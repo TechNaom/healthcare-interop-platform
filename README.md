@@ -2,9 +2,9 @@
 
 A HIPAA-aligned HL7 v2 + FHIR (R4/R5) data integration platform. **Python-only for the current build** — orchestration, API surface, and validation/transform. C++ high-throughput validation is a documented future phase, not current scope (see [ADR-006](docs/DECISIONS.md#adr-006)). Containers as the deployable unit on any OS or cloud.
 
-## Status: Planning complete — build not started
+## Status: Kickoff questions resolved — 12-week AI-orchestrated track, Phase 0 starting
 
-Every document below is written and internally consistent. No source code exists in this repository yet, by design — implementation starts only on explicit go-ahead. See [Open Questions](<Healthcare Interop Platform.md#open-questions-from-kickoff-review>) for the two things still pending your confirmation before Phase 0 begins.
+Every document below is written and internally consistent. Kickoff questions (track length, synthetic-data-only policy, GitHub remote) were resolved 2026-08-24 — see [Open Questions](<Healthcare Interop Platform.md#open-questions-from-kickoff-review>) for the record. Phase 0 (repo scaffold + canonical model spec) is next.
 
 ## Documentation map
 
@@ -24,7 +24,7 @@ Every document below is written and internally consistent. No source code exists
 
 ## Hard constraints (apply to every future change)
 
-- **No real PHI, ever** — not in code, fixtures, logs, or this repo. Synthetic data only.
+- **No real PHI, ever** — not in code, fixtures, logs, or this repo. Synthetic data only. (Reconfirmed 2026-08-24.)
 - **No external CI/SaaS** without a signed BAA and explicit sign-off.
 - **Platform-agnostic** — no OS-specific paths, no cloud-vendor SDK in core logic, containers always.
 
