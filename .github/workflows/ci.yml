@@ -1,0 +1,63 @@
+# CI on the private repo — GitHub Actions, hosted runners (ADR-007).
+# Safe because of the synthetic-data-only rule (ADR-005): CI never has real PHI
+# to leak. If real PHI ever needs to run through CI, revisit ADR-007 first.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Ruff (lint + format check)
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: mypy
+        run: uv run mypy
+
+      - name: bandit
+        run: uv run bandit -c pyproject.toml -r src
+
+      - name: pytest (unit, integration, e2e, regression, compliance — not perf/uat)
+        run: uv run pytest -m "not performance and not uat" --cov
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    # gitleaks-action reads the PR's commits via the API on pull_request events;
+    # that needs pull-requests: read (the top-level contents:read block alone
+    # yields "403 Resource not accessible by integration").
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
