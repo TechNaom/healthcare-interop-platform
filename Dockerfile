@@ -18,7 +18,9 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /app
 
 # Dependency layer — cached unless the lock/manifest changes.
-COPY pyproject.toml ./
+# README.md is copied too: pyproject's `readme = "README.md"` means hatchling
+# needs it present when it builds the project in the final `uv sync` below.
+COPY pyproject.toml README.md ./
 COPY uv.lock* ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-install-project --no-dev || uv sync --no-dev
