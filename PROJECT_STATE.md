@@ -86,25 +86,29 @@ tests/          test_scaffold.py (import/health smoke tests)
 ## Toolchain status (2026-08-24)
 
 - **Installed & working:** `uv` 0.12.5 (user-space, `~/.local/bin`),
-  **Python 3.12.14** (via uv, matches the pin), and the full dev toolchain
-  (`ruff`, `mypy`, `bandit`, `pytest`, `pre-commit`) in `.venv`. `uv.lock`
-  committed.
+  **Python 3.12.14** (via uv, matches the pin), the full dev toolchain
+  (`ruff`, `mypy`, `bandit`, `pytest`, `pre-commit`) in `.venv`, and
+  **Docker 29.7.2 + Compose v5.5.0** (native Engine in WSL, systemd service;
+  `dell` is in the `docker` group). `uv.lock` committed.
 - **Verified green locally:** `ruff check` · `ruff format --check` ·
   `mypy --strict` (28 files) · `bandit` (0 issues) · `pytest --cov`
   (29 passed, 100% coverage). Run them with `uv run <tool>`.
+- **Container path verified end-to-end:** `docker build` → `hip:local`
+  (43 MB, amd64, non-root `appuser`); `docker run` imports the package and
+  prints its module map; `docker compose up db` → Postgres reports **healthy**.
+  (The first build caught a real bug — README.md wasn't copied into the build
+  stage for hatchling; fixed.)
 
 ## Known gaps / prerequisites
 
-- **Docker not installed** — needs sudo (password-gated here) or, preferred on
-  WSL, **Docker Desktop for Windows** with WSL integration (a Windows-side
-  install). Until then the container build, `docker compose up`, and
-  `testcontainers` tests **cannot be run/verified locally.** Dockerfile /
-  compose / CI are written but **unverified against a real Docker daemon.**
+- **Multi-arch build unverified.** Images build for `amd64` here; the
+  `linux/arm64` half of the ADR-003 multi-arch target hasn't been built (needs
+  `docker buildx` with QEMU or an arm runner) — CI is the place to prove it.
 - **pre-commit + drvfs is slow.** The `gitleaks` hook scanning git history over
   `/mnt/d` (Windows-mounted) is prohibitively slow, so local commits use
   `--no-verify` after running the checks manually. gitleaks still runs in CI
   (secret-scan job). If local hooks are wanted, run them on the WSL-native side
-  or drop gitleaks from the local hook set and keep it CI-only.
+  or keep gitleaks CI-only.
 - No `LICENSE` file (private client repo — intentional unless told otherwise).
 
 ## Next recommended task
