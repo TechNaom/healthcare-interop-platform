@@ -38,6 +38,10 @@ Thumbs.db
 *.key
 *secret*
 *credentials*
+# ...but the source module `security.secrets` (docs/DESIGN.md 1) is code, not a
+# credential — the broad *secret* glob above would otherwise exclude it and it
+# would silently never be committed. Keep it tracked.
+!src/hip/security/secrets.py
 
 # --- PHI / patient data — hard rule, not a suggestion ---
 # No real patient data should ever exist in this repo. Synthetic
