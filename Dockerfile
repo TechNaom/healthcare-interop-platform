@@ -46,6 +46,8 @@ ENV PATH="/app/.venv/bin:$PATH" \
 
 USER appuser
 
-# Placeholder entrypoint until the gateway app exists (Phase 1). Kept as a
-# module invocation so it fails loudly if the package can't be imported.
-CMD ["python", "-c", "import hip; print(hip.__doc__)"]
+EXPOSE 8000
+
+# Serve the Gateway. Uvicorn binds all interfaces inside the container; the host
+# and TLS termination are handled outside the process (Traefik — docs/TECH_STACK.md).
+CMD ["uvicorn", "hip.gateway.app:app", "--host", "0.0.0.0", "--port", "8000"]

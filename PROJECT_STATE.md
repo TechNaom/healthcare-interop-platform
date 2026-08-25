@@ -13,25 +13,32 @@ unit. Full context: [README.md](README.md) → [Healthcare Interop Platform.md](
 
 ## Current status
 
-**Phase 0 (Foundations & governance) — scaffolding in progress on branch `phase-0-scaffold`.**
+**Phase 0 merged (PR #1). Phase 1 in review (PR #2, CI green): canonical model + running gateway.**
 
-- Planning: **complete.** SRS, architecture, design, data model,
-  security/compliance, test strategy, tech stack, and 9 ADRs are all written
-  and internally consistent (`docs/`).
+- Planning: **complete** (`docs/`, 9 ADRs).
 - Kickoff questions: **resolved** 2026-08-24 — 12-week AI-orchestrated track;
-  synthetic-data-only reconfirmed; private GitHub remote is the source of
-  truth (supersedes the original "local-only" default, per [ADR-004](docs/DECISIONS.md#adr-004)).
-- Code: **repo skeleton being laid down** — package tree, interface stubs,
-  container/CI/pre-commit config. **No business logic yet** — every module is a
-  documented stub pointing at its design-doc section.
+  synthetic-data-only; private GitHub remote is source of truth ([ADR-004](docs/DECISIONS.md#adr-004)).
+- **Phase 0 (foundations)** — merged to `main`: package skeleton, container/CI/
+  pre-commit, four-tier testing framework.
+- **Phase 1 (PR #2)** — the canonical data model as Pydantic types
+  (`hip.messaging.canonical.model`, faithful to DATA_MODEL.md v0.2.0 — the
+  ADR-001 review deliverable) and a **FastAPI gateway that runs** (`/healthz`,
+  `/readyz`, OpenAPI), verified natively and in-container.
+- **Still stubbed by design:** the canonical `mapper` (awaits model sign-off per
+  ADR-001), HL7 ingestion, FHIR CRUD, persistence, auth.
+
+### ⚠️ Review gate open (ADR-001)
+The canonical model (`docs/DATA_MODEL.md` v0.2.0 + `hip.messaging.canonical.model`)
+should be **reviewed/signed off before mapper code** is written against it — the
+intended human checkpoint. Don't build the mapper until it clears.
 
 ## Timeline — 12-week AI-orchestrated track
 
 | Week | Focus | State |
 |---|---|---|
-| 1 | Foundations only | 🔨 in progress |
-| 2 | Canonical model: drafted, revised, signed off | ⬜ |
-| 3 | Skeletons (gRPC stub deferred — ADR-006) | ⬜ |
+| 1 | Foundations only | ✅ merged (PR #1) |
+| 2 | Canonical model: drafted, revised, signed off | 🔨 model built (PR #2); **sign-off pending** |
+| 3 | Skeletons (gRPC stub deferred — ADR-006) | 🔨 gateway skeleton + health done (PR #2) |
 | 4–5 | HL7 ingestion built, then hardened | ⬜ |
 | 6 | HL7→FHIR mapping, FHIR CRUD core | ⬜ |
 | 7 | FHIR completeness | ⬜ |

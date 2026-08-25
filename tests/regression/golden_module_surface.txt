@@ -6,11 +6,13 @@ hip.gateway
 hip.gateway.api
 hip.gateway.api.admin
 hip.gateway.api.fhir
+hip.gateway.app
 hip.gateway.auth
 hip.gateway.ratelimit
 hip.messaging
 hip.messaging.canonical
 hip.messaging.canonical.mapper
+hip.messaging.canonical.model
 hip.messaging.hl7
 hip.messaging.hl7.listener
 hip.messaging.hl7.parser

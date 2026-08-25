@@ -63,8 +63,14 @@ services:
         condition: service_healthy
     environment:
       HIP_ENV: local
-    # Placeholder until the gateway exists (Phase 1).
-    command: ["python", "-c", "import hip; print(hip.__doc__)"]
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz').status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 volumes:
   db_data:
