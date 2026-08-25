@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 
 import pytest
 
 from hip.messaging.canonical import model as m
 from hip.messaging.canonical.mapper import MappingError, map_message
-from hip.messaging.hl7.listener import process_raw
+from hip.messaging.hl7.listener import ingest, process_raw
 from hip.messaging.hl7.parser import parse
 
 pytestmark = pytest.mark.unit
@@ -103,6 +104,14 @@ def test_orm_maps_order_with_status_derivation() -> None:
 
 def test_pipeline_maps_accepted_message_to_bundle(adt_a01: str) -> None:
     result = process_raw(adt_a01)
+    assert result.ack_code.value == "AA"
+    assert result.bundle is not None
+    assert result.bundle.patient is not None
+
+
+def test_ingest_without_session_is_map_only(adt_a01: str) -> None:
+    """ingest() with no session factory maps and acks but does not persist."""
+    result = asyncio.run(ingest(adt_a01))
     assert result.ack_code.value == "AA"
     assert result.bundle is not None
     assert result.bundle.patient is not None

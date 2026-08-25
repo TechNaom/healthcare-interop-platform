@@ -20,9 +20,11 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from hip.messaging.canonical.mapper import map_message
+from hip.messaging.hl7.listener import MLLPListener
+from hip.messaging.hl7.mllp import MLLPBuffer, wrap
 from hip.messaging.hl7.parser import parse
 from hip.persistence.db import make_engine, make_sessionmaker
 from hip.persistence.models import AuditEvent, PhiResource
@@ -31,6 +33,19 @@ from hip.persistence.phi_repo import PhiRepository
 pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+async def _truncate(url: str) -> None:
+    engine = make_engine(url)
+    async with engine.begin() as conn:
+        await conn.execute(text("TRUNCATE phi_resources, audit_events"))
+    await engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def clean_tables(migrated_db: str) -> None:
+    """Isolate tests — empty the tables before each one."""
+    asyncio.run(_truncate(migrated_db))
 
 
 @pytest.fixture(scope="module")
@@ -107,3 +122,38 @@ async def _persist_read_audit(url: str, adt: str) -> None:
 
 def test_bundle_persists_with_audit(migrated_db: str, adt_a01: str) -> None:
     asyncio.run(_persist_read_audit(migrated_db, adt_a01))
+
+
+async def _socket_to_db(url: str, adt: str) -> int:
+    """Full loop: HL7 over an MLLP socket -> stored in Postgres."""
+    engine = make_engine(url)
+    session_factory = make_sessionmaker(engine)
+    listener = MLLPListener(host="127.0.0.1", port=0, session_factory=session_factory)
+    server = await listener.start()
+    assert server.sockets
+    port = server.sockets[0].getsockname()[1]
+
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    try:
+        writer.write(wrap(adt))
+        await writer.drain()
+        buf = MLLPBuffer()
+        acks: list[str] = []
+        while not acks:
+            acks.extend(buf.feed(await asyncio.wait_for(reader.read(4096), timeout=5)))
+        assert "MSA|AA" in acks[0]  # accepted
+    finally:
+        writer.close()
+        server.close()
+        await server.wait_closed()
+
+    async with session_factory() as session:
+        stored = await session.scalar(select(func.count()).select_from(PhiResource))
+    await engine.dispose()
+    return stored or 0
+
+
+def test_ingested_message_is_persisted_end_to_end(migrated_db: str, adt_a01: str) -> None:
+    """An HL7 message sent over the wire lands in the store — the full ingest loop."""
+    stored = asyncio.run(_socket_to_db(migrated_db, adt_a01))
+    assert stored == 2  # Patient + Encounter
