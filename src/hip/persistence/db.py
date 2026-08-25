@@ -10,8 +10,12 @@ from __future__ import annotations
 
 import os
 
-from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
-from sqlalchemy.ext.asyncio import AsyncSession as AsyncSession
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 # Local dev default (synthetic data only). Overridden by env everywhere real.
 _DEFAULT_URL = "postgresql+asyncpg://hip:hip@localhost:5432/hip"
