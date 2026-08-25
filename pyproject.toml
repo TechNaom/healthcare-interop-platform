@@ -14,6 +14,9 @@ dependencies = [
     "pydantic>=2.9",
     "uvicorn[standard]>=0.30",
     "hl7>=0.4",  # HL7 v2 parsing (docs/TECH_STACK.md); MLLP framing is hand-rolled
+    "sqlalchemy[asyncio]>=2.0",  # async ORM / repository layer
+    "asyncpg>=0.29",  # async PostgreSQL driver
+    "alembic>=1.13",  # schema migrations (required from day one, docs/TECH_STACK.md)
 ]
 
 [project.optional-dependencies]
@@ -25,6 +28,7 @@ dev = [
     "pytest-cov>=5.0",
     "pre-commit>=3.8",
     "httpx>=0.27",
+    "testcontainers[postgres]>=4.0",  # real Postgres for integration tests (no mocks)
 ]
 # Performance/load tooling — kept out of the default dev set so a normal
 # `uv sync --extra dev` stays fast. Install with `uv sync --extra perf` in the
@@ -45,6 +49,8 @@ packages = ["src/hip"]
 line-length = 100
 target-version = "py312"
 src = ["src", "tests"]
+# Alembic migration scripts follow their own generated conventions.
+extend-exclude = ["migrations"]
 
 [tool.ruff.lint]
 # Conservative starting set; tighten per-phase as real code lands.

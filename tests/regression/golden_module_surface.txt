@@ -22,7 +22,9 @@ hip.messaging.hl7.router
 hip.messaging.validator
 hip.persistence
 hip.persistence.audit_log
+hip.persistence.db
 hip.persistence.deid_repo
+hip.persistence.models
 hip.persistence.phi_repo
 hip.platform
 hip.platform.paths
