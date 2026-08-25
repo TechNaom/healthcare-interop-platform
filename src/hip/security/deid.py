@@ -44,15 +44,16 @@ _RESTRICTED_ZIP3 = frozenset(
 )
 
 _MAX_AGE = 89  # ages over 89 must be aggregated to "90 or older"
+_ZIP3_LEN = 3  # Safe Harbor permits only the first 3 ZIP digits
 
 
 def _generalize_zip(postal_code: str | None) -> str | None:
     if not postal_code:
         return None
     digits = "".join(ch for ch in postal_code if ch.isdigit())
-    if len(digits) < 3:
+    if len(digits) < _ZIP3_LEN:
         return None
-    zip3 = digits[:3]
+    zip3 = digits[:_ZIP3_LEN]
     return "000" if zip3 in _RESTRICTED_ZIP3 else zip3
 
 
@@ -128,7 +129,7 @@ def patient_safe_harbor_violations(patient: m.Patient) -> list[str]:
     for addr in patient.address:
         if addr.lines or addr.city:
             violations.append("address_fine_grained")
-        if addr.postal_code and len(addr.postal_code) > 3:
+        if addr.postal_code and len(addr.postal_code) > _ZIP3_LEN:
             violations.append("zip_full")
     if patient.birth_date is not None and (patient.birth_date.month, patient.birth_date.day) != (
         1,
