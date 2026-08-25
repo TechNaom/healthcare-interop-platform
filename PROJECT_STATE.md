@@ -45,7 +45,7 @@ the next mapping direction.
 | 6 | HL7→FHIR mapping, FHIR CRUD core | 🔨 HL7→canonical mapper done + wired; canonical→FHIR + CRUD next |
 | 7 | FHIR completeness | ⬜ |
 | 8 | Python validator hardening (C++ deferred — ADR-006) | ⬜ |
-| 9 | Persistence, RBAC, audit log, KeyManager | ⬜ |
+| 9 | Persistence, RBAC, audit log, KeyManager | 🔨 async Postgres store + append-only audit + Alembic done; RBAC/KeyManager/encryption next |
 | 10 | Safe Harbor de-id, OpenTelemetry | ⬜ |
 | 11 | Integration testing + bug-fix buffer | ⬜ |
 | 12 | Stabilization, demo, retrospective | ⬜ |
