@@ -214,7 +214,7 @@ class FailureStage(StrEnum):
 
 
 # The polymorphic Observation value (OBX-5), selected by OBX-2 (docs/DATA_MODEL.md
-# "Polychmorphic observation values"). Order matters for pydantic's smart union:
+# "Polymorphic observation values"). Order matters for pydantic's smart union:
 # structured types before the str fallback.
 ObservationValue = Quantity | CodeableConcept | datetime | bool | int | float | str
 

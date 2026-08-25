@@ -27,10 +27,12 @@ unit. Full context: [README.md](README.md) → [Healthcare Interop Platform.md](
 - **Still stubbed by design:** the canonical `mapper` (awaits model sign-off per
   ADR-001), HL7 ingestion, FHIR CRUD, persistence, auth.
 
-### ⚠️ Review gate open (ADR-001)
-The canonical model (`docs/DATA_MODEL.md` v0.2.0 + `hip.messaging.canonical.model`)
-should be **reviewed/signed off before mapper code** is written against it — the
-intended human checkpoint. Don't build the mapper until it clears.
+### ADR-001 gate: cleared 2026-08-25
+The canonical model was reviewed against `docs/DATA_MODEL.md` v0.2.0 and HL7/FHIR
+correctness (findings: 1 comment typo fixed; DiagnosticReport/OBR-25 remains a
+documented deferral). Model accepted → the **HL7→canonical mapper is built**
+(`hip.messaging.canonical.mapper`) and wired into ingestion. Canonical→FHIR is
+the next mapping direction.
 
 ## Timeline — 12-week AI-orchestrated track
 
@@ -39,8 +41,8 @@ intended human checkpoint. Don't build the mapper until it clears.
 | 1 | Foundations only | ✅ merged (PR #1) |
 | 2 | Canonical model: drafted, revised, signed off | ✅ model built (PR #2); **sign-off pending** |
 | 3 | Skeletons (gRPC stub deferred — ADR-006) | ✅ gateway skeleton + health done (PR #2) |
-| 4–5 | HL7 ingestion built, then hardened | 🔨 MLLP listener + parse + route + ACK/NACK done; hardening/edge-cases next |
-| 6 | HL7→FHIR mapping, FHIR CRUD core | ⬜ |
+| 4–5 | HL7 ingestion built, then hardened | ✅ MLLP listener + parse + route + ACK/NACK; edge-case hardening ongoing |
+| 6 | HL7→FHIR mapping, FHIR CRUD core | 🔨 HL7→canonical mapper done + wired; canonical→FHIR + CRUD next |
 | 7 | FHIR completeness | ⬜ |
 | 8 | Python validator hardening (C++ deferred — ADR-006) | ⬜ |
 | 9 | Persistence, RBAC, audit log, KeyManager | ⬜ |

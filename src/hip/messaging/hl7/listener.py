@@ -16,6 +16,8 @@ import asyncio
 import logging
 from dataclasses import dataclass
 
+from hip.messaging.canonical import mapper
+from hip.messaging.canonical.mapper import CanonicalBundle, MappingError
 from hip.messaging.hl7 import ack, router
 from hip.messaging.hl7.mllp import MLLPBuffer, wrap
 from hip.messaging.hl7.parser import ParseError, parse
@@ -30,13 +32,17 @@ class IngestResult:
     ack_code: ack.AckCode
     ack_message: str
     reason: str = ""
+    bundle: CanonicalBundle | None = None
 
 
 def process_raw(raw: str) -> IngestResult:
-    """Run one raw HL7 message through parse -> route -> acknowledge.
+    """Run one raw HL7 message through parse -> route -> map -> acknowledge.
 
-    Never raises for bad input — a parse failure becomes an AR NACK, which is
-    the correct HL7 behavior (a malformed message must be answered, not dropped).
+    Never raises for bad input. Failure at each stage yields the right NACK:
+    parse failure -> AR (reject), unsupported type -> AR, mapping/transform
+    failure -> AE (error; sender may retry after fixing). A malformed message
+    is always answered, never dropped (docs/DATA_MODEL.md dead-letter stages).
+    Persistence of the mapped bundle lands in a later phase.
     """
     try:
         parsed = parse(raw)
@@ -45,12 +51,20 @@ def process_raw(raw: str) -> IngestResult:
         return IngestResult(ack.AckCode.AR, nack, reason=exc.reason)
 
     decision = router.route(parsed)
-    ack_message = ack.build_ack(
-        parsed,
-        decision.ack_code,
-        text=decision.detail,
-    )
-    return IngestResult(decision.ack_code, ack_message, reason=decision.reason)
+    if decision.ack_code is not ack.AckCode.AA:
+        nack = ack.build_ack(parsed, decision.ack_code, text=decision.detail)
+        return IngestResult(decision.ack_code, nack, reason=decision.reason)
+
+    # Accepted: map to the canonical model (ADR-001). A mapping failure is a
+    # transform-stage error -> AE NACK (would become a dead-letter once wired).
+    try:
+        bundle = mapper.map_message(parsed)
+    except MappingError as exc:
+        nack = ack.build_ack(parsed, ack.AckCode.AE, text=f"{exc.reason} {exc.detail}".strip())
+        return IngestResult(ack.AckCode.AE, nack, reason=exc.reason)
+
+    ack_message = ack.build_ack(parsed, ack.AckCode.AA)
+    return IngestResult(ack.AckCode.AA, ack_message, bundle=bundle)
 
 
 class MLLPListener:
