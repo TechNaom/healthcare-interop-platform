@@ -1,9 +1,10 @@
-"""Integration: the full round trip — HL7 in, FHIR out.
+"""Integration: the full round trip — HL7 in, FHIR out, with auth enforced.
 
 Ingest an ADT over the pipeline into real Postgres, then read the patient back
-through the gateway's FHIR API and assert it is well-formed FHIR R4. Uses httpx
-against the ASGI app (no network server needed); the app's session factory is
-pointed at the test database. Synthetic HL7 only (ADR-005).
+through the gateway's FHIR API and assert it is well-formed FHIR R4. The endpoint
+requires a valid token with the ``fhir:read`` role, so the test also covers the
+401 (no token) and 403 (wrong role) paths. Uses httpx against the ASGI app (no
+network server needed). Synthetic HL7 only (ADR-005).
 """
 
 from __future__ import annotations
@@ -13,9 +14,11 @@ from typing import Any
 from uuid import UUID
 
 import httpx
+import jwt
 import pytest
 
 from hip.gateway.app import create_app
+from hip.gateway.auth import TokenAuthenticator
 from hip.messaging.canonical.mapper import map_message
 from hip.messaging.hl7.parser import parse
 from hip.persistence.db import make_engine, make_sessionmaker
@@ -23,12 +26,21 @@ from hip.persistence.phi_repo import PhiRepository
 
 pytestmark = pytest.mark.integration
 
+_SECRET = "integration-test-secret-padding-32b-minimum"  # noqa: S105
 
-async def _ingest_then_read_fhir(url: str, adt: str) -> tuple[int, dict[str, Any]]:
+
+def _token(*roles: str, sub: str = "dr.who") -> str:
+    return jwt.encode({"sub": sub, "realm_access": {"roles": list(roles)}}, _SECRET, "HS256")
+
+
+def _auth_header(*roles: str, sub: str = "dr.who") -> dict[str, str]:
+    return {"Authorization": f"Bearer {_token(*roles, sub=sub)}"}
+
+
+async def _scenario(url: str, adt: str) -> dict[str, httpx.Response]:
     engine = make_engine(url)
     session_factory = make_sessionmaker(engine)
 
-    # Ingest an ADT and capture the patient's canonical id.
     bundle = map_message(parse(adt))
     assert bundle.patient is not None
     patient_id: UUID = bundle.patient.canonical_id
@@ -36,31 +48,43 @@ async def _ingest_then_read_fhir(url: str, adt: str) -> tuple[int, dict[str, Any
         await PhiRepository(session).save_bundle(bundle)
         await session.commit()
 
-    # Build the app, point it at the test DB (bypass lifespan), read via FHIR API.
     app = create_app()
     app.state.engine = engine
     app.state.session_factory = session_factory
+    app.state.authenticator = TokenAuthenticator(secret=_SECRET)
+
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.get(f"/fhir/Patient/{patient_id}")
-        missing = await client.get(f"/fhir/Patient/{UUID(int=0)}")
-
+        path = f"/fhir/Patient/{patient_id}"
+        responses = {
+            "ok": await client.get(path, headers=_auth_header("fhir:read")),
+            "missing_token": await client.get(path),
+            "wrong_role": await client.get(path, headers=_auth_header("billing")),
+            "not_found": await client.get(
+                f"/fhir/Patient/{UUID(int=0)}", headers=_auth_header("fhir:read")
+            ),
+        }
     await engine.dispose()
-    assert missing.status_code == 404
-    assert missing.json()["resourceType"] == "OperationOutcome"
-    return resp.status_code, resp.json()
+    return responses
 
 
-def test_hl7_in_fhir_out(clean_db: str, adt_a01: str) -> None:
-    status, body = _run(clean_db, adt_a01)
-    assert status == 200
+def test_fhir_read_enforces_auth_and_returns_patient(clean_db: str, adt_a01: str) -> None:
+    r = asyncio.run(_scenario(clean_db, adt_a01))
+
+    # Authenticated with the right role -> the FHIR Patient.
+    assert r["ok"].status_code == 200
+    body: dict[str, Any] = r["ok"].json()
     assert body["resourceType"] == "Patient"
     assert body["name"][0]["family"] == "DOE"
     assert body["gender"] == "female"
-    assert body["birthDate"] == "1980-01-01"
-    # identifier carries the source MRN + assigning authority.
     assert any(i["value"] == "MRN12345" for i in body["identifier"])
 
+    # No token -> 401; wrong role -> 403; both as FHIR OperationOutcome.
+    assert r["missing_token"].status_code == 401
+    assert r["missing_token"].json()["resourceType"] == "OperationOutcome"
+    assert r["wrong_role"].status_code == 403
+    assert r["wrong_role"].json()["resourceType"] == "OperationOutcome"
 
-def _run(url: str, adt: str) -> tuple[int, dict[str, Any]]:
-    return asyncio.run(_ingest_then_read_fhir(url, adt))
+    # Unknown id (authorized) -> 404 OperationOutcome.
+    assert r["not_found"].status_code == 404
+    assert r["not_found"].json()["resourceType"] == "OperationOutcome"

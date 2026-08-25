@@ -18,6 +18,7 @@ dependencies = [
     "asyncpg>=0.29",  # async PostgreSQL driver
     "alembic>=1.13",  # schema migrations (required from day one, docs/TECH_STACK.md)
     "fhir-resources>=8.0",
+    "pyjwt[crypto]>=2.9",
 ]
 
 [project.optional-dependencies]

@@ -15,7 +15,8 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hip.gateway.deps import get_session
+from hip.gateway.auth import Principal
+from hip.gateway.deps import get_session, require_role
 from hip.messaging.canonical import model as m
 from hip.messaging.canonical.fhir import to_fhir_patient
 from hip.persistence.phi_repo import PhiRepository
@@ -23,6 +24,10 @@ from hip.persistence.phi_repo import PhiRepository
 router = APIRouter(prefix="/fhir", tags=["fhir"])
 
 _FHIR_JSON = "application/fhir+json"
+
+# RBAC role required to read clinical resources (SRS 5.1). ABAC/field-level
+# filtering and SMART-on-FHIR scopes are refinements on top of this.
+_READ_ROLE = "fhir:read"
 
 
 def _operation_outcome(code: str, diagnostics: str, status_code: int) -> JSONResponse:
@@ -37,10 +42,12 @@ def _operation_outcome(code: str, diagnostics: str, status_code: int) -> JSONRes
 async def read_patient(
     canonical_id: UUID,
     session: Annotated[AsyncSession, Depends(get_session)],
+    principal: Annotated[Principal, Depends(require_role(_READ_ROLE))],
 ) -> JSONResponse:
     """Return a stored patient as a FHIR R4 Patient (or a 404 OperationOutcome)."""
     repo = PhiRepository(session)
-    row = await repo.get(canonical_id, actor="api:read")  # emits a read audit
+    # The audit trail records the real authenticated subject, not a placeholder.
+    row = await repo.get(canonical_id, actor=principal.subject)
     await session.commit()
 
     if row is None or row.resource_type != "Patient":
