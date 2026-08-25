@@ -8,9 +8,11 @@ hip.gateway.api.admin
 hip.gateway.api.fhir
 hip.gateway.app
 hip.gateway.auth
+hip.gateway.deps
 hip.gateway.ratelimit
 hip.messaging
 hip.messaging.canonical
+hip.messaging.canonical.fhir
 hip.messaging.canonical.mapper
 hip.messaging.canonical.model
 hip.messaging.hl7

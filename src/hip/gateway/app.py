@@ -11,10 +11,30 @@ In container:  uvicorn hip.gateway.app:app --host 0.0.0.0 --port 8000
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from hip import __version__
-from hip.gateway.api import admin
+from hip.gateway.api import admin, fhir
+from hip.persistence.db import make_engine, make_sessionmaker
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Create the DB engine/session factory at startup, dispose at shutdown.
+
+    The engine is created lazily-connecting, so building the app never requires a
+    reachable database — only routes that actually query one do.
+    """
+    engine = make_engine()
+    app.state.engine = engine
+    app.state.session_factory = make_sessionmaker(engine)
+    try:
+        yield
+    finally:
+        await engine.dispose()
 
 
 def create_app() -> FastAPI:
@@ -23,9 +43,10 @@ def create_app() -> FastAPI:
         title="Healthcare Interoperability Platform — Gateway",
         version=__version__,
         summary="HIPAA-aligned HL7 v2 + FHIR (R4/R5) interoperability gateway.",
+        lifespan=lifespan,
     )
     app.include_router(admin.router)
-    # Phase 6-7: app.include_router(fhir.router, prefix="/fhir")
+    app.include_router(fhir.router)
     return app
 
 

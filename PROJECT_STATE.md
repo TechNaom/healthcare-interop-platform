@@ -42,7 +42,7 @@ the next mapping direction.
 | 2 | Canonical model: drafted, revised, signed off | ✅ model built (PR #2); **sign-off pending** |
 | 3 | Skeletons (gRPC stub deferred — ADR-006) | ✅ gateway skeleton + health done (PR #2) |
 | 4–5 | HL7 ingestion built, then hardened | ✅ MLLP listener + parse + route + ACK/NACK; edge-case hardening ongoing |
-| 6 | HL7→FHIR mapping, FHIR CRUD core | 🔨 HL7→canonical mapper done + wired; canonical→FHIR + CRUD next |
+| 6 | HL7→FHIR mapping, FHIR CRUD core | 🔨 HL7→canonical + canonical→FHIR done; GET /fhir/Patient live; more resources + write/search next |
 | 7 | FHIR completeness | ⬜ |
 | 8 | Python validator hardening (C++ deferred — ADR-006) | ⬜ |
 | 9 | Persistence, RBAC, audit log, KeyManager | 🔨 async Postgres store + append-only audit + Alembic done; RBAC/KeyManager/encryption next |

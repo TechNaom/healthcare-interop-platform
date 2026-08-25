@@ -17,6 +17,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0",  # async ORM / repository layer
     "asyncpg>=0.29",  # async PostgreSQL driver
     "alembic>=1.13",  # schema migrations (required from day one, docs/TECH_STACK.md)
+    "fhir-resources>=8.0",
 ]
 
 [project.optional-dependencies]

@@ -13,14 +13,9 @@ only (ADR-005).
 from __future__ import annotations
 
 import asyncio
-import os
-import subprocess
-import sys
-from collections.abc import Iterator
-from pathlib import Path
 
 import pytest
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 
 from hip.messaging.canonical.mapper import map_message
 from hip.messaging.hl7.listener import MLLPListener
@@ -31,50 +26,6 @@ from hip.persistence.models import AuditEvent, PhiResource
 from hip.persistence.phi_repo import PhiRepository
 
 pytestmark = pytest.mark.integration
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-
-
-async def _truncate(url: str) -> None:
-    engine = make_engine(url)
-    async with engine.begin() as conn:
-        await conn.execute(text("TRUNCATE phi_resources, audit_events"))
-    await engine.dispose()
-
-
-@pytest.fixture(autouse=True)
-def clean_tables(migrated_db: str) -> None:
-    """Isolate tests — empty the tables before each one."""
-    asyncio.run(_truncate(migrated_db))
-
-
-@pytest.fixture(scope="module")
-def pg_url() -> Iterator[str]:
-    env_url = os.environ.get("HIP_TEST_DATABASE_URL")
-    if env_url:
-        yield env_url
-        return
-    # No external DB provided -> manage one with testcontainers (CI path).
-    from testcontainers.postgres import PostgresContainer
-
-    with PostgresContainer("postgres:16") as pg:
-        host = pg.get_container_host_ip()
-        port = pg.get_exposed_port(5432)
-        yield f"postgresql+asyncpg://{pg.username}:{pg.password}@{host}:{port}/{pg.dbname}"
-
-
-@pytest.fixture(scope="module")
-def migrated_db(pg_url: str) -> str:
-    """Apply the Alembic migration to the target database."""
-    env = {**os.environ, "HIP_DATABASE_URL": pg_url}
-    subprocess.run(  # noqa: S603
-        [sys.executable, "-m", "alembic", "upgrade", "head"],
-        cwd=REPO_ROOT,
-        env=env,
-        check=True,
-        capture_output=True,
-    )
-    return pg_url
 
 
 async def _persist_read_audit(url: str, adt: str) -> None:
@@ -120,8 +71,8 @@ async def _persist_read_audit(url: str, adt: str) -> None:
     await engine.dispose()
 
 
-def test_bundle_persists_with_audit(migrated_db: str, adt_a01: str) -> None:
-    asyncio.run(_persist_read_audit(migrated_db, adt_a01))
+def test_bundle_persists_with_audit(clean_db: str, adt_a01: str) -> None:
+    asyncio.run(_persist_read_audit(clean_db, adt_a01))
 
 
 async def _socket_to_db(url: str, adt: str) -> int:
@@ -153,7 +104,7 @@ async def _socket_to_db(url: str, adt: str) -> int:
     return stored or 0
 
 
-def test_ingested_message_is_persisted_end_to_end(migrated_db: str, adt_a01: str) -> None:
+def test_ingested_message_is_persisted_end_to_end(clean_db: str, adt_a01: str) -> None:
     """An HL7 message sent over the wire lands in the store — the full ingest loop."""
-    stored = asyncio.run(_socket_to_db(migrated_db, adt_a01))
+    stored = asyncio.run(_socket_to_db(clean_db, adt_a01))
     assert stored == 2  # Patient + Encounter
