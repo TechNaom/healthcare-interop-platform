@@ -37,9 +37,9 @@ intended human checkpoint. Don't build the mapper until it clears.
 | Week | Focus | State |
 |---|---|---|
 | 1 | Foundations only | ✅ merged (PR #1) |
-| 2 | Canonical model: drafted, revised, signed off | 🔨 model built (PR #2); **sign-off pending** |
-| 3 | Skeletons (gRPC stub deferred — ADR-006) | 🔨 gateway skeleton + health done (PR #2) |
-| 4–5 | HL7 ingestion built, then hardened | ⬜ |
+| 2 | Canonical model: drafted, revised, signed off | ✅ model built (PR #2); **sign-off pending** |
+| 3 | Skeletons (gRPC stub deferred — ADR-006) | ✅ gateway skeleton + health done (PR #2) |
+| 4–5 | HL7 ingestion built, then hardened | 🔨 MLLP listener + parse + route + ACK/NACK done; hardening/edge-cases next |
 | 6 | HL7→FHIR mapping, FHIR CRUD core | ⬜ |
 | 7 | FHIR completeness | ⬜ |
 | 8 | Python validator hardening (C++ deferred — ADR-006) | ⬜ |

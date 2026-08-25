@@ -13,6 +13,7 @@ dependencies = [
     "fastapi>=0.115",
     "pydantic>=2.9",
     "uvicorn[standard]>=0.30",
+    "hl7>=0.4",  # HL7 v2 parsing (docs/TECH_STACK.md); MLLP framing is hand-rolled
 ]
 
 [project.optional-dependencies]
@@ -60,6 +61,11 @@ python_version = "3.12"
 strict = true
 files = ["src", "tests"]
 warn_unused_configs = true
+
+# python-hl7 ships no type stubs / py.typed marker.
+[[tool.mypy.overrides]]
+module = "hl7.*"
+ignore_missing_imports = true
 
 # --- pytest -------------------------------------------------------------
 [tool.pytest.ini_options]

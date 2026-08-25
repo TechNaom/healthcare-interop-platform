@@ -14,7 +14,9 @@ hip.messaging.canonical
 hip.messaging.canonical.mapper
 hip.messaging.canonical.model
 hip.messaging.hl7
+hip.messaging.hl7.ack
 hip.messaging.hl7.listener
+hip.messaging.hl7.mllp
 hip.messaging.hl7.parser
 hip.messaging.hl7.router
 hip.messaging.validator
