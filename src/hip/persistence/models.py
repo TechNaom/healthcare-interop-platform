@@ -65,3 +65,20 @@ class AuditEvent(Base):
     resource_id: Mapped[UUID | None] = mapped_column(nullable=True, index=True)
     actor: Mapped[str] = mapped_column(String(128), index=True)  # who (system/user)
     detail: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+
+class DeidResource(Base):
+    """A de-identified resource, kept in a SEPARATE store from PHI.
+
+    Deliberately carries NO column linking back to the source PHI record — a
+    reverse path would defeat de-identification (docs/DATA_MODEL.md flow
+    invariant). ``id`` is the de-identified instance's own fresh canonical_id.
+    """
+
+    __tablename__ = "deid_resources"
+
+    canonical_id: Mapped[UUID] = mapped_column(primary_key=True)
+    resource_type: Mapped[str] = mapped_column(String(64), index=True)
+    schema_version: Mapped[str] = mapped_column(String(32))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

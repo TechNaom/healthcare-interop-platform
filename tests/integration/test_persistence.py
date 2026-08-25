@@ -22,7 +22,7 @@ from hip.messaging.hl7.listener import MLLPListener
 from hip.messaging.hl7.mllp import MLLPBuffer, wrap
 from hip.messaging.hl7.parser import parse
 from hip.persistence.db import make_engine, make_sessionmaker
-from hip.persistence.models import AuditEvent, PhiResource
+from hip.persistence.models import AuditEvent, DeidResource, PhiResource
 from hip.persistence.phi_repo import PhiRepository
 
 pytestmark = pytest.mark.integration
@@ -108,3 +108,40 @@ def test_ingested_message_is_persisted_end_to_end(clean_db: str, adt_a01: str) -
     """An HL7 message sent over the wire lands in the store — the full ingest loop."""
     stored = asyncio.run(_socket_to_db(clean_db, adt_a01))
     assert stored == 2  # Patient + Encounter
+
+
+async def _deid_after_ingest(url: str, adt: str) -> dict[str, object]:
+    engine = make_engine(url)
+    session_factory = make_sessionmaker(engine)
+    bundle = map_message(parse(adt))
+    async with session_factory() as session:
+        await PhiRepository(session).save_bundle(bundle)
+        from hip.persistence.deid_repo import DeidRepository
+        from hip.security.deid import deidentify_patient
+
+        assert bundle.patient is not None
+        await DeidRepository(session).save(deidentify_patient(bundle.patient))
+        await session.commit()
+
+    async with session_factory() as session:
+        count = await session.scalar(select(func.count()).select_from(DeidResource))
+        row = (await session.execute(select(DeidResource))).scalar_one()
+    await engine.dispose()
+    return {"count": count, "payload": row.payload}
+
+
+def test_deidentified_copy_stored_without_phi(clean_db: str, adt_a01: str) -> None:
+    """Ingest produces a de-identified Patient in the separate store, carrying no PHI."""
+    result = _run_deid(clean_db, adt_a01)
+    assert result["count"] == 1
+    payload = result["payload"]
+    assert isinstance(payload, dict)
+    # Safe Harbor identifiers must be absent from the de-identified store.
+    assert not payload.get("name")
+    assert not payload.get("identifiers")
+    assert payload.get("account_number") is None
+    assert not payload.get("telecom")
+
+
+def _run_deid(url: str, adt: str) -> dict[str, object]:
+    return asyncio.run(_deid_after_ingest(url, adt))

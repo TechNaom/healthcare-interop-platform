@@ -27,7 +27,9 @@ from hip.messaging.hl7 import ack, router
 from hip.messaging.hl7.mllp import MLLPBuffer, wrap
 from hip.messaging.hl7.parser import ParsedMessage, ParseError, parse
 from hip.persistence.db import make_engine, make_sessionmaker
+from hip.persistence.deid_repo import DeidRepository
 from hip.persistence.phi_repo import PhiRepository
+from hip.security.deid import deidentify_patient
 
 logger = logging.getLogger("hip.messaging.hl7.listener")
 
@@ -87,6 +89,11 @@ async def ingest(raw: str, session_factory: SessionFactory | None = None) -> Ing
     try:
         async with session_factory() as session:
             await PhiRepository(session).save_bundle(result.bundle)
+            # Produce a de-identified copy into the separate de-id store. Same
+            # transaction so PHI + its de-identified derivative are atomic.
+            if result.bundle.patient is not None:
+                deid_patient = deidentify_patient(result.bundle.patient)
+                await DeidRepository(session).save(deid_patient)
             await session.commit()
     except SQLAlchemyError as exc:
         logger.error("persist failed: %s", type(exc).__name__)  # never log PHI
