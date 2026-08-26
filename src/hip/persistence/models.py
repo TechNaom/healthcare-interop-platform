@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, String, func
+from sqlalchemy import DateTime, LargeBinary, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -37,14 +37,19 @@ def _now() -> datetime:
 
 
 class PhiResource(Base):
-    """A stored canonical resource. ``payload`` is the canonical model as JSON."""
+    """A stored canonical resource.
+
+    ``payload_ciphertext`` holds the canonical document **encrypted** by the
+    KeyManager (HIPAA 164.312(a)(2)(iv)) — Postgres only ever sees ciphertext.
+    The relational spine (id/type/version) stays clear for lookup and indexing.
+    """
 
     __tablename__ = "phi_resources"
 
     canonical_id: Mapped[UUID] = mapped_column(primary_key=True)
     resource_type: Mapped[str] = mapped_column(String(64), index=True)
     schema_version: Mapped[str] = mapped_column(String(32))
-    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    payload_ciphertext: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

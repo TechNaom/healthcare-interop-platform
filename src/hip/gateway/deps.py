@@ -15,6 +15,7 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hip.gateway.auth import AuthError, Principal, TokenAuthenticator
+from hip.security.keymanager import KeyManager
 
 
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
@@ -22,6 +23,14 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
     session_factory = request.app.state.session_factory
     async with session_factory() as session:
         yield session
+
+
+def get_key_manager(request: Request) -> KeyManager:
+    """The configured KeyManager, or fail closed if encryption isn't configured."""
+    key_manager: KeyManager | None = request.app.state.key_manager
+    if key_manager is None:
+        raise AuthError(500, "exception", "encryption is not configured")
+    return key_manager
 
 
 async def get_principal(request: Request) -> Principal:

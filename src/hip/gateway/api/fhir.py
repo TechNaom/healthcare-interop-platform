@@ -16,10 +16,11 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hip.gateway.auth import Principal
-from hip.gateway.deps import get_session, require_role
+from hip.gateway.deps import get_key_manager, get_session, require_role
 from hip.messaging.canonical import model as m
 from hip.messaging.canonical.fhir import to_fhir_patient
 from hip.persistence.phi_repo import PhiRepository
+from hip.security.keymanager import KeyManager
 
 router = APIRouter(prefix="/fhir", tags=["fhir"])
 
@@ -43,15 +44,16 @@ async def read_patient(
     canonical_id: UUID,
     session: Annotated[AsyncSession, Depends(get_session)],
     principal: Annotated[Principal, Depends(require_role(_READ_ROLE))],
+    key_manager: Annotated[KeyManager, Depends(get_key_manager)],
 ) -> JSONResponse:
     """Return a stored patient as a FHIR R4 Patient (or a 404 OperationOutcome)."""
-    repo = PhiRepository(session)
+    repo = PhiRepository(session, key_manager)
     # The audit trail records the real authenticated subject, not a placeholder.
-    row = await repo.get(canonical_id, actor=principal.subject)
+    stored = await repo.get(canonical_id, actor=principal.subject)
     await session.commit()
 
-    if row is None or row.resource_type != "Patient":
+    if stored is None or stored.resource_type != "Patient":
         return _operation_outcome("not-found", f"Patient/{canonical_id} not found", 404)
 
-    patient = m.Patient.model_validate(row.payload)
+    patient = m.Patient.model_validate(stored.payload)
     return JSONResponse(to_fhir_patient(patient), media_type=_FHIR_JSON)

@@ -23,6 +23,7 @@ from hip.messaging.canonical.mapper import map_message
 from hip.messaging.hl7.parser import parse
 from hip.persistence.db import make_engine, make_sessionmaker
 from hip.persistence.phi_repo import PhiRepository
+from hip.security.keymanager import KeyManager
 
 pytestmark = pytest.mark.integration
 
@@ -37,7 +38,7 @@ def _auth_header(*roles: str, sub: str = "dr.who") -> dict[str, str]:
     return {"Authorization": f"Bearer {_token(*roles, sub=sub)}"}
 
 
-async def _scenario(url: str, adt: str) -> dict[str, httpx.Response]:
+async def _scenario(url: str, adt: str, km: KeyManager) -> dict[str, httpx.Response]:
     engine = make_engine(url)
     session_factory = make_sessionmaker(engine)
 
@@ -45,13 +46,14 @@ async def _scenario(url: str, adt: str) -> dict[str, httpx.Response]:
     assert bundle.patient is not None
     patient_id: UUID = bundle.patient.canonical_id
     async with session_factory() as session:
-        await PhiRepository(session).save_bundle(bundle)
+        await PhiRepository(session, km).save_bundle(bundle)
         await session.commit()
 
     app = create_app()
     app.state.engine = engine
     app.state.session_factory = session_factory
     app.state.authenticator = TokenAuthenticator(secret=_SECRET)
+    app.state.key_manager = km
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -68,8 +70,10 @@ async def _scenario(url: str, adt: str) -> dict[str, httpx.Response]:
     return responses
 
 
-def test_fhir_read_enforces_auth_and_returns_patient(clean_db: str, adt_a01: str) -> None:
-    r = asyncio.run(_scenario(clean_db, adt_a01))
+def test_fhir_read_enforces_auth_and_returns_patient(
+    clean_db: str, adt_a01: str, key_manager: KeyManager
+) -> None:
+    r = asyncio.run(_scenario(clean_db, adt_a01, key_manager))
 
     # Authenticated with the right role -> the FHIR Patient.
     assert r["ok"].status_code == 200

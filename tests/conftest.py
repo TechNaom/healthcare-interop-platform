@@ -23,6 +23,8 @@ from pathlib import Path
 
 import pytest
 
+from hip.security.keymanager import KeyManager
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -81,6 +83,14 @@ def clean_db(migrated_db: str) -> str:
     """A migrated DB with empty tables — isolates each integration test."""
     asyncio.run(_truncate(migrated_db))
     return migrated_db
+
+
+@pytest.fixture(scope="session")
+def key_manager() -> KeyManager:
+    """A stable test KeyManager (Fernet) for encrypt/decrypt round trips."""
+    from hip.security.keymanager import FernetKeyManager
+
+    return FernetKeyManager(FernetKeyManager.generate_key())
 
 
 # --------------------------------------------------------------------------- #

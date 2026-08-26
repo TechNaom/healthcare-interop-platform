@@ -30,6 +30,7 @@ from hip.persistence.db import make_engine, make_sessionmaker
 from hip.persistence.deid_repo import DeidRepository
 from hip.persistence.phi_repo import PhiRepository
 from hip.security.deid import deidentify_patient
+from hip.security.keymanager import KeyManager, keymanager_from_env
 
 logger = logging.getLogger("hip.messaging.hl7.listener")
 
@@ -75,20 +76,35 @@ def process_raw(raw: str) -> IngestResult:
     return IngestResult(ack.AckCode.AA, ack_message, bundle=bundle, parsed=parsed)
 
 
-async def ingest(raw: str, session_factory: SessionFactory | None = None) -> IngestResult:
-    """Full ingestion: ``process_raw`` then persist an accepted bundle.
+async def ingest(
+    raw: str,
+    session_factory: SessionFactory | None = None,
+    key_manager: KeyManager | None = None,
+) -> IngestResult:
+    """Full ingestion: ``process_raw`` then persist an accepted bundle (encrypted).
 
     Data and its audit trail commit in one transaction (PhiRepository). A
     persistence failure becomes an AE NACK (persist stage) rather than a lost
     message. With no ``session_factory`` this is map-only (AA without storing).
+    Fail-closed: if persisting but no ``key_manager`` is configured, the message
+    is NACKed (AE) rather than stored unencrypted.
     """
     result = process_raw(raw)
     if session_factory is None or result.ack_code is not ack.AckCode.AA or result.bundle is None:
         return result
 
+    if key_manager is None:
+        parsed = result.parsed
+        nack = (
+            ack.build_ack(parsed, ack.AckCode.AE, text="ENCRYPTION_NOT_CONFIGURED")
+            if parsed is not None
+            else ack.build_nack_unparseable("ENCRYPTION_NOT_CONFIGURED")
+        )
+        return IngestResult(ack.AckCode.AE, nack, reason="ENCRYPTION_NOT_CONFIGURED", parsed=parsed)
+
     try:
         async with session_factory() as session:
-            await PhiRepository(session).save_bundle(result.bundle)
+            await PhiRepository(session, key_manager).save_bundle(result.bundle)
             # Produce a de-identified copy into the separate de-id store. Same
             # transaction so PHI + its de-identified derivative are atomic.
             if result.bundle.patient is not None:
@@ -121,12 +137,14 @@ class MLLPListener:
         port: int = 2575,
         *,
         session_factory: SessionFactory | None = None,
+        key_manager: KeyManager | None = None,
     ) -> None:
         # Binding all interfaces is the point of a network listener; exposure is
         # controlled at the container/network boundary. Hence the S104/B104 waivers.
         self.host = host
         self.port = port
         self._session_factory = session_factory
+        self._key_manager = key_manager
         self._server: asyncio.Server | None = None
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -135,7 +153,7 @@ class MLLPListener:
         try:
             while data := await reader.read(4096):
                 for message in buffer.feed(data):
-                    result = await ingest(message, self._session_factory)
+                    result = await ingest(message, self._session_factory, self._key_manager)
                     # Never log message content — it is PHI (ADR-005).
                     logger.info("hl7 message from %s -> %s", peer, result.ack_code.value)
                     writer.write(wrap(result.ack_message))
@@ -162,7 +180,8 @@ async def _main() -> None:  # pragma: no cover - operational entrypoint
     logging.basicConfig(level=logging.INFO)
     engine = make_engine()
     session_factory = make_sessionmaker(engine)
-    await MLLPListener(session_factory=session_factory).serve_forever()
+    key_manager = keymanager_from_env()
+    await MLLPListener(session_factory=session_factory, key_manager=key_manager).serve_forever()
 
 
 if __name__ == "__main__":  # pragma: no cover

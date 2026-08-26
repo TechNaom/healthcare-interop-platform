@@ -21,6 +21,7 @@ from hip import __version__
 from hip.gateway.api import admin, fhir
 from hip.gateway.auth import AuthError, authenticator_from_env
 from hip.persistence.db import make_engine, make_sessionmaker
+from hip.security.keymanager import keymanager_from_env
 
 
 @asynccontextmanager
@@ -34,6 +35,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.engine = engine
     app.state.session_factory = make_sessionmaker(engine)
     app.state.authenticator = authenticator_from_env()
+    app.state.key_manager = keymanager_from_env()
     try:
         yield
     finally:
