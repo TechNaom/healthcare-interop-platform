@@ -3,7 +3,7 @@
 Maps to ``gateway.api.fhir`` in docs/DESIGN.md 1. Reads target the canonical
 model (ADR-001) and render it as FHIR via ``canonical.fhir`` — routes never touch
 HL7. Responses use ``application/fhir+json`` and a FHIR ``OperationOutcome`` on
-error. Scope now: Patient read; other resources and search follow.
+error. Scope now: Patient/Encounter/Observation reads; write and search follow.
 """
 
 from __future__ import annotations
@@ -17,9 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hip.gateway.auth import Principal
 from hip.gateway.deps import get_key_manager, get_session, require_role
+from hip.messaging.canonical import fhir as serialize
 from hip.messaging.canonical import model as m
-from hip.messaging.canonical.fhir import to_fhir_patient
-from hip.persistence.phi_repo import PhiRepository
+from hip.persistence.phi_repo import PhiRepository, StoredResource
 from hip.security.keymanager import KeyManager
 
 router = APIRouter(prefix="/fhir", tags=["fhir"])
@@ -30,6 +30,11 @@ _FHIR_JSON = "application/fhir+json"
 # filtering and SMART-on-FHIR scopes are refinements on top of this.
 _READ_ROLE = "fhir:read"
 
+# Shared dependency aliases keep the per-route signatures small.
+SessionDep = Annotated[AsyncSession, Depends(get_session)]
+PrincipalDep = Annotated[Principal, Depends(require_role(_READ_ROLE))]
+KeyDep = Annotated[KeyManager, Depends(get_key_manager)]
+
 
 def _operation_outcome(code: str, diagnostics: str, status_code: int) -> JSONResponse:
     body: dict[str, Any] = {
@@ -39,21 +44,54 @@ def _operation_outcome(code: str, diagnostics: str, status_code: int) -> JSONRes
     return JSONResponse(body, status_code=status_code, media_type=_FHIR_JSON)
 
 
+def _fhir(resource: dict[str, Any]) -> JSONResponse:
+    return JSONResponse(resource, media_type=_FHIR_JSON)
+
+
+async def _fetch(
+    resource_type: str,
+    canonical_id: UUID,
+    session: AsyncSession,
+    principal: Principal,
+    key_manager: KeyManager,
+) -> StoredResource | JSONResponse:
+    """Read a stored resource of the expected type (emitting a read audit), or a
+    404 OperationOutcome."""
+    stored = await PhiRepository(session, key_manager).get(canonical_id, actor=principal.subject)
+    await session.commit()
+    if stored is None or stored.resource_type != resource_type:
+        return _operation_outcome("not-found", f"{resource_type}/{canonical_id} not found", 404)
+    return stored
+
+
 @router.get("/Patient/{canonical_id}")
 async def read_patient(
-    canonical_id: UUID,
-    session: Annotated[AsyncSession, Depends(get_session)],
-    principal: Annotated[Principal, Depends(require_role(_READ_ROLE))],
-    key_manager: Annotated[KeyManager, Depends(get_key_manager)],
+    canonical_id: UUID, session: SessionDep, principal: PrincipalDep, key_manager: KeyDep
 ) -> JSONResponse:
     """Return a stored patient as a FHIR R4 Patient (or a 404 OperationOutcome)."""
-    repo = PhiRepository(session, key_manager)
-    # The audit trail records the real authenticated subject, not a placeholder.
-    stored = await repo.get(canonical_id, actor=principal.subject)
-    await session.commit()
+    result = await _fetch("Patient", canonical_id, session, principal, key_manager)
+    if isinstance(result, JSONResponse):
+        return result
+    return _fhir(serialize.to_fhir_patient(m.Patient.model_validate(result.payload)))
 
-    if stored is None or stored.resource_type != "Patient":
-        return _operation_outcome("not-found", f"Patient/{canonical_id} not found", 404)
 
-    patient = m.Patient.model_validate(stored.payload)
-    return JSONResponse(to_fhir_patient(patient), media_type=_FHIR_JSON)
+@router.get("/Encounter/{canonical_id}")
+async def read_encounter(
+    canonical_id: UUID, session: SessionDep, principal: PrincipalDep, key_manager: KeyDep
+) -> JSONResponse:
+    """Return a stored encounter as a FHIR R4 Encounter (or a 404 OperationOutcome)."""
+    result = await _fetch("Encounter", canonical_id, session, principal, key_manager)
+    if isinstance(result, JSONResponse):
+        return result
+    return _fhir(serialize.to_fhir_encounter(m.Encounter.model_validate(result.payload)))
+
+
+@router.get("/Observation/{canonical_id}")
+async def read_observation(
+    canonical_id: UUID, session: SessionDep, principal: PrincipalDep, key_manager: KeyDep
+) -> JSONResponse:
+    """Return a stored observation as a FHIR R4 Observation (or a 404 OperationOutcome)."""
+    result = await _fetch("Observation", canonical_id, session, principal, key_manager)
+    if isinstance(result, JSONResponse):
+        return result
+    return _fhir(serialize.to_fhir_observation(m.Observation.model_validate(result.payload)))

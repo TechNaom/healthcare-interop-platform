@@ -92,3 +92,53 @@ def test_fhir_read_enforces_auth_and_returns_patient(
     # Unknown id (authorized) -> 404 OperationOutcome.
     assert r["not_found"].status_code == 404
     assert r["not_found"].json()["resourceType"] == "OperationOutcome"
+
+
+async def _read_encounter_and_observation(
+    url: str, adt: str, oru: str, km: KeyManager
+) -> tuple[httpx.Response, httpx.Response]:
+    engine = make_engine(url)
+    session_factory = make_sessionmaker(engine)
+
+    adt_bundle = map_message(parse(adt))
+    oru_bundle = map_message(parse(oru))
+    assert adt_bundle.encounter is not None
+    assert oru_bundle.observations
+    enc_id = adt_bundle.encounter.canonical_id
+    obs_id = oru_bundle.observations[0].canonical_id
+    async with session_factory() as session:
+        repo = PhiRepository(session, km)
+        await repo.save_bundle(adt_bundle)
+        await repo.save_bundle(oru_bundle)
+        await session.commit()
+
+    app = create_app()
+    app.state.engine = engine
+    app.state.session_factory = session_factory
+    app.state.authenticator = TokenAuthenticator(secret=_SECRET)
+    app.state.key_manager = km
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        headers = _auth_header("fhir:read")
+        enc = await client.get(f"/fhir/Encounter/{enc_id}", headers=headers)
+        obs = await client.get(f"/fhir/Observation/{obs_id}", headers=headers)
+    await engine.dispose()
+    return enc, obs
+
+
+def test_encounter_and_observation_reads(
+    clean_db: str, adt_a01: str, oru_r01: str, key_manager: KeyManager
+) -> None:
+    enc, obs = asyncio.run(_read_encounter_and_observation(clean_db, adt_a01, oru_r01, key_manager))
+
+    assert enc.status_code == 200
+    enc_body = enc.json()
+    assert enc_body["resourceType"] == "Encounter"
+    assert enc_body["status"] == "in-progress"  # ADT^A01
+
+    assert obs.status_code == 200
+    obs_body = obs.json()
+    assert obs_body["resourceType"] == "Observation"
+    assert obs_body["code"]["coding"][0]["code"] == "2339-0"
+    assert obs_body["valueQuantity"]["value"] == 5.4
