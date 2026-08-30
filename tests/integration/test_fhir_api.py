@@ -152,3 +152,53 @@ def test_encounter_and_observation_reads(
     assert obs_body["resourceType"] == "Observation"
     assert obs_body["code"]["coding"][0]["code"] == "2339-0"
     assert obs_body["valueQuantity"]["value"] == 5.4
+
+
+_NEW_PATIENT = {
+    "resourceType": "Patient",
+    "identifier": [{"system": "HOSP", "value": "MRN-NEW", "type": {"coding": [{"code": "MR"}]}}],
+    "name": [{"use": "official", "family": "ROE", "given": ["RICH"]}],
+    "gender": "male",
+    "birthDate": "1975-03-09",
+}
+
+
+async def _create_then_read(
+    url: str, km: KeyManager
+) -> tuple[httpx.Response, httpx.Response, httpx.Response]:
+    engine = make_engine(url)
+    session_factory = make_sessionmaker(engine)
+    app = create_app()
+    app.state.engine = engine
+    app.state.session_factory = session_factory
+    app.state.authenticator = TokenAuthenticator(secret=_SECRET)
+    app.state.key_manager = km
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await client.post(
+            "/fhir/Patient", json=_NEW_PATIENT, headers=_auth_header("fhir:write")
+        )
+        location = created.headers.get("Location", "")
+        read_back = await client.get(location, headers=_auth_header("fhir:read", "phi:full"))
+        forbidden = await client.post(
+            "/fhir/Patient", json=_NEW_PATIENT, headers=_auth_header("fhir:read")
+        )  # read role can't write
+    await engine.dispose()
+    return created, read_back, forbidden
+
+
+def test_create_patient_then_read_back(clean_db: str, key_manager: KeyManager) -> None:
+    created, read_back, forbidden = asyncio.run(_create_then_read(clean_db, key_manager))
+
+    assert created.status_code == 201
+    assert created.headers["Location"].startswith("/fhir/Patient/")
+    assert created.json()["name"][0]["family"] == "ROE"
+
+    # The created resource is retrievable and encrypted-at-rest round-trips.
+    assert read_back.status_code == 200
+    assert read_back.json()["name"][0]["family"] == "ROE"
+    assert any(i["value"] == "MRN-NEW" for i in read_back.json()["identifier"])
+
+    # Write requires the write role.
+    assert forbidden.status_code == 403

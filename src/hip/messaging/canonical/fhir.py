@@ -11,12 +11,14 @@ and land as the read API grows.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from enum import StrEnum
 from typing import Any
 
 from fhir.resources.R4B.encounter import Encounter as FHIREncounter
 from fhir.resources.R4B.observation import Observation as FHIRObservation
 from fhir.resources.R4B.patient import Patient as FHIRPatient
+from pydantic import ValidationError
 
 from hip.messaging.canonical import model as m
 
@@ -246,3 +248,107 @@ def to_fhir_observation(observation: m.Observation) -> dict[str, Any]:
         data["referenceRange"] = [{"text": observation.reference_range}]
 
     return FHIRObservation.model_validate(data).model_dump(mode="json", exclude_none=True)
+
+
+# --------------------------------------------------------------------------- #
+# FHIR -> canonical (the write edge). Validate the incoming FHIR, then map from
+# the plain JSON so we don't wrestle with library value-types.
+# --------------------------------------------------------------------------- #
+class FhirParseError(Exception):
+    """Raised when an incoming FHIR resource is invalid or unmappable."""
+
+
+# FHIR name-use -> canonical NameUse (reverse of _NAME_USE).
+_NAME_USE_REVERSE = {
+    "official": m.NameUse.official,
+    "usual": m.NameUse.usual,
+    "nickname": m.NameUse.alias,
+    "maiden": m.NameUse.maiden,
+}
+
+
+def _enum_or_none[E: StrEnum](enum_cls: type[E], value: Any) -> E | None:
+    try:
+        return enum_cls(value)
+    except ValueError:
+        return None
+
+
+def _identifier_in(data: dict[str, Any]) -> m.Identifier | None:
+    value = data.get("value")
+    if not value:
+        return None
+    type_code = None
+    coding = (data.get("type") or {}).get("coding") or []
+    if coding:
+        type_code = coding[0].get("code")
+    return m.Identifier(value=value, system=data.get("system"), type=type_code)
+
+
+def _name_in(data: dict[str, Any]) -> m.HumanName:
+    return m.HumanName(
+        family=data.get("family"),
+        given=list(data.get("given", [])),
+        prefix=list(data.get("prefix", [])),
+        suffix=list(data.get("suffix", [])),
+        use=_NAME_USE_REVERSE.get(data.get("use", "")),
+    )
+
+
+def _address_in(data: dict[str, Any]) -> m.Address:
+    return m.Address(
+        lines=list(data.get("line", [])),
+        city=data.get("city"),
+        state=data.get("state"),
+        postal_code=data.get("postalCode"),
+        country=data.get("country"),
+        use=_enum_or_none(m.AddressUse, data.get("use")),
+    )
+
+
+def _date_in(value: Any) -> date | None:
+    """FHIR date may be partial (YYYY / YYYY-MM); keep only full YYYY-MM-DD."""
+    try:
+        return date.fromisoformat(value) if value else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _datetime_in(value: Any) -> datetime | None:
+    try:
+        return datetime.fromisoformat(value) if value else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _telecom_in(data: dict[str, Any]) -> m.ContactPoint | None:
+    value = data.get("value")
+    if not value:
+        return None
+    return m.ContactPoint(
+        system=_enum_or_none(m.ContactPointSystem, data.get("system")),
+        value=value,
+        use=_enum_or_none(m.ContactPointUse, data.get("use")),
+    )
+
+
+def from_fhir_patient(data: dict[str, Any]) -> m.Patient:
+    """Map an incoming FHIR R4 Patient to a new canonical Patient (fresh id).
+
+    Raises ``FhirParseError`` if the payload isn't valid FHIR R4 Patient.
+    """
+    try:
+        FHIRPatient.model_validate(data)  # structural validation only
+    except ValidationError as exc:
+        raise FhirParseError(str(exc)) from exc
+
+    return m.Patient(
+        identifiers=[i for i in (_identifier_in(d) for d in data.get("identifier", [])) if i],
+        name=[_name_in(d) for d in data.get("name", [])],
+        birth_date=_date_in(data.get("birthDate")),
+        administrative_sex=_enum_or_none(m.AdministrativeGender, data.get("gender")),
+        address=[_address_in(d) for d in data.get("address", [])],
+        telecom=[t for t in (_telecom_in(d) for d in data.get("telecom", [])) if t],
+        deceased=data.get("deceasedBoolean"),
+        deceased_datetime=_datetime_in(data.get("deceasedDateTime")),
+    )

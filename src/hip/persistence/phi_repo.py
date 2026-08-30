@@ -77,6 +77,10 @@ class PhiRepository:
         )
         return resource.canonical_id
 
+    async def save(self, resource: m.CanonicalResource, *, actor: str) -> UUID:
+        """Persist a single canonical resource (encrypted) with an audit event."""
+        return await self._upsert(resource, actor=actor)
+
     async def save_bundle(
         self, bundle: CanonicalBundle, *, actor: str = SYSTEM_ACTOR
     ) -> list[UUID]:

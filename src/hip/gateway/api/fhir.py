@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Body, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +20,7 @@ from hip.gateway.deps import get_key_manager, get_session, require_role
 from hip.gateway.min_necessary import FULL_ACCESS_ROLE, apply_minimum_necessary
 from hip.messaging.canonical import fhir as serialize
 from hip.messaging.canonical import model as m
+from hip.messaging.canonical.fhir import FhirParseError
 from hip.persistence.phi_repo import PhiRepository, StoredResource
 from hip.security.keymanager import KeyManager
 
@@ -27,13 +28,14 @@ router = APIRouter(prefix="/fhir", tags=["fhir"])
 
 _FHIR_JSON = "application/fhir+json"
 
-# RBAC role required to read clinical resources (SRS 5.1). ABAC/field-level
-# filtering and SMART-on-FHIR scopes are refinements on top of this.
+# RBAC roles (SRS 5.1). read = view resources; write = create/update.
 _READ_ROLE = "fhir:read"
+_WRITE_ROLE = "fhir:write"
 
 # Shared dependency aliases keep the per-route signatures small.
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 PrincipalDep = Annotated[Principal, Depends(require_role(_READ_ROLE))]
+WritePrincipalDep = Annotated[Principal, Depends(require_role(_WRITE_ROLE))]
 KeyDep = Annotated[KeyManager, Depends(get_key_manager)]
 
 
@@ -109,4 +111,27 @@ async def read_observation(
         "Observation",
         serialize.to_fhir_observation(m.Observation.model_validate(result.payload)),
         principal,
+    )
+
+
+@router.post("/Patient", status_code=201)
+async def create_patient(
+    session: SessionDep,
+    principal: WritePrincipalDep,
+    key_manager: KeyDep,
+    body: Annotated[dict[str, Any], Body(media_type=_FHIR_JSON)],
+) -> JSONResponse:
+    """Create a Patient from a FHIR R4 body. 201 + Location, or 400 on invalid FHIR."""
+    try:
+        patient = serialize.from_fhir_patient(body)
+    except FhirParseError as exc:
+        return _operation_outcome("invalid", f"invalid FHIR Patient: {exc}", 400)
+
+    await PhiRepository(session, key_manager).save(patient, actor=principal.subject)
+    await session.commit()
+
+    created = serialize.to_fhir_patient(patient)
+    location = f"/fhir/Patient/{patient.canonical_id}"
+    return JSONResponse(
+        created, status_code=201, media_type=_FHIR_JSON, headers={"Location": location}
     )
