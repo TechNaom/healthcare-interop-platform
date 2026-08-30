@@ -25,6 +25,7 @@ hip.messaging.validator
 hip.persistence
 hip.persistence.audit_log
 hip.persistence.db
+hip.persistence.dead_letter_repo
 hip.persistence.deid_repo
 hip.persistence.models
 hip.persistence.phi_repo

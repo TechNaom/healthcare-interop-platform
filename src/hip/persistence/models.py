@@ -87,3 +87,25 @@ class DeidResource(Base):
     schema_version: Mapped[str] = mapped_column(String(32))
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DeadLetterRow(Base):
+    """An unprocessable inbound message (docs/DATA_MODEL.md DeadLetterMessage).
+
+    Classified PHI: the raw HL7 payload can contain PHI, so ``raw_ciphertext`` is
+    encrypted by the KeyManager just like the PHI store — this is NOT a debug log.
+    The metadata columns stay clear for triage/reprocessing.
+    """
+
+    __tablename__ = "dead_letter_messages"
+
+    dead_letter_id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+    failure_stage: Mapped[str] = mapped_column(
+        String(16), index=True
+    )  # parse/validate/transform/persist
+    failure_reason_code: Mapped[str] = mapped_column(String(64))
+    failure_reason_detail: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    source: Mapped[str | None] = mapped_column(String(255), nullable=True)  # MSH-3/4
+    message_control_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    raw_ciphertext: Mapped[bytes] = mapped_column(LargeBinary)  # encrypted raw HL7 (PHI)

@@ -74,7 +74,9 @@ async def _truncate(url: str) -> None:
 
     engine = make_engine(url)
     async with engine.begin() as conn:
-        await conn.execute(text("TRUNCATE phi_resources, audit_events, deid_resources"))
+        await conn.execute(
+            text("TRUNCATE phi_resources, audit_events, deid_resources, dead_letter_messages")
+        )
     await engine.dispose()
 
 

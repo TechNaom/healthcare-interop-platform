@@ -17,16 +17,19 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hip.messaging.canonical import mapper
 from hip.messaging.canonical.mapper import CanonicalBundle, MappingError
+from hip.messaging.canonical.model import DeadLetterMessage, FailureReason, FailureStage
 from hip.messaging.hl7 import ack, router
 from hip.messaging.hl7.mllp import MLLPBuffer, wrap
 from hip.messaging.hl7.parser import ParsedMessage, ParseError, parse
 from hip.persistence.db import make_engine, make_sessionmaker
+from hip.persistence.dead_letter_repo import DeadLetterRepository
 from hip.persistence.deid_repo import DeidRepository
 from hip.persistence.phi_repo import PhiRepository
 from hip.security.deid import deidentify_patient
@@ -44,36 +47,87 @@ class IngestResult:
     ack_code: ack.AckCode
     ack_message: str
     reason: str = ""
+    detail: str = ""
     bundle: CanonicalBundle | None = None
     parsed: ParsedMessage | None = None
+    failure_stage: FailureStage | None = None
 
 
 def process_raw(raw: str) -> IngestResult:
     """Parse -> route -> map (pure; no I/O).
 
-    Never raises for bad input. Each stage failure yields the right NACK:
-    parse -> AR, unsupported type -> AR, mapping/transform -> AE. A malformed
+    Never raises for bad input. Each stage failure yields the right NACK and a
+    ``failure_stage`` so the caller can dead-letter it: parse -> AR (parse),
+    unsupported type -> AR (validate), mapping -> AE (transform). A malformed
     message is always answered, never dropped (docs/DATA_MODEL.md stages).
     """
     try:
         parsed = parse(raw)
     except ParseError as exc:
         nack = ack.build_nack_unparseable(exc.reason, exc.detail)
-        return IngestResult(ack.AckCode.AR, nack, reason=exc.reason)
+        return IngestResult(
+            ack.AckCode.AR,
+            nack,
+            reason=exc.reason,
+            detail=exc.detail,
+            failure_stage=FailureStage.parse,
+        )
 
     decision = router.route(parsed)
     if decision.ack_code is not ack.AckCode.AA:
         nack = ack.build_ack(parsed, decision.ack_code, text=decision.detail)
-        return IngestResult(decision.ack_code, nack, reason=decision.reason, parsed=parsed)
+        return IngestResult(
+            decision.ack_code,
+            nack,
+            reason=decision.reason,
+            detail=decision.detail,
+            parsed=parsed,
+            failure_stage=FailureStage.validate,
+        )
 
     try:
         bundle = mapper.map_message(parsed)
     except MappingError as exc:
         nack = ack.build_ack(parsed, ack.AckCode.AE, text=f"{exc.reason} {exc.detail}".strip())
-        return IngestResult(ack.AckCode.AE, nack, reason=exc.reason, parsed=parsed)
+        return IngestResult(
+            ack.AckCode.AE,
+            nack,
+            reason=exc.reason,
+            detail=exc.detail,
+            parsed=parsed,
+            failure_stage=FailureStage.transform,
+        )
 
     ack_message = ack.build_ack(parsed, ack.AckCode.AA)
     return IngestResult(ack.AckCode.AA, ack_message, bundle=bundle, parsed=parsed)
+
+
+async def _store_dead_letter(
+    session_factory: SessionFactory,
+    key_manager: KeyManager,
+    raw: str,
+    result: IngestResult,
+) -> None:
+    """Persist an unprocessable message (encrypted). Never raises — a dead-letter
+    write failure is logged, not propagated (the sender already has the NACK)."""
+    if result.failure_stage is None:
+        return
+    parsed = result.parsed
+    source = f"{parsed.sending_application}/{parsed.sending_facility}" if parsed else None
+    message = DeadLetterMessage(
+        received_at=datetime.now(UTC),
+        source=source,
+        raw_message=raw,
+        failure_stage=result.failure_stage,
+        failure_reason=FailureReason(code=result.reason, detail=result.detail or None),
+        message_control_id=parsed.control_id if parsed else None,
+    )
+    try:
+        async with session_factory() as session:
+            await DeadLetterRepository(session, key_manager).save(message)
+            await session.commit()
+    except SQLAlchemyError as exc:
+        logger.error("dead-letter store failed: %s", type(exc).__name__)  # never log PHI
 
 
 async def ingest(
@@ -81,46 +135,61 @@ async def ingest(
     session_factory: SessionFactory | None = None,
     key_manager: KeyManager | None = None,
 ) -> IngestResult:
-    """Full ingestion: ``process_raw`` then persist an accepted bundle (encrypted).
+    """Full ingestion: ``process_raw``, then persist an accepted bundle (encrypted)
+    or dead-letter an unprocessable one.
 
-    Data and its audit trail commit in one transaction (PhiRepository). A
-    persistence failure becomes an AE NACK (persist stage) rather than a lost
-    message. With no ``session_factory`` this is map-only (AA without storing).
-    Fail-closed: if persisting but no ``key_manager`` is configured, the message
-    is NACKed (AE) rather than stored unencrypted.
+    Data + audit commit in one transaction. A malformed/unsupported/transform
+    failure is stored (encrypted) in the dead-letter store, not lost. With no
+    ``session_factory`` this is map-only. Fail-closed: without a ``key_manager``
+    nothing PHI-bearing (bundle or raw dead-letter) is stored.
     """
     result = process_raw(raw)
-    if session_factory is None or result.ack_code is not ack.AckCode.AA or result.bundle is None:
-        return result
+    if session_factory is None:
+        return result  # map-only mode: no persistence, no dead-letter
 
     if key_manager is None:
-        parsed = result.parsed
-        nack = (
-            ack.build_ack(parsed, ack.AckCode.AE, text="ENCRYPTION_NOT_CONFIGURED")
-            if parsed is not None
-            else ack.build_nack_unparseable("ENCRYPTION_NOT_CONFIGURED")
-        )
-        return IngestResult(ack.AckCode.AE, nack, reason="ENCRYPTION_NOT_CONFIGURED", parsed=parsed)
+        # Cannot store PHI (bundle or raw payload) unencrypted -> fail closed.
+        if result.ack_code is ack.AckCode.AA and result.bundle is not None:
+            parsed = result.parsed
+            nack = (
+                ack.build_ack(parsed, ack.AckCode.AE, text="ENCRYPTION_NOT_CONFIGURED")
+                if parsed is not None
+                else ack.build_nack_unparseable("ENCRYPTION_NOT_CONFIGURED")
+            )
+            return IngestResult(
+                ack.AckCode.AE, nack, reason="ENCRYPTION_NOT_CONFIGURED", parsed=parsed
+            )
+        return result
 
-    try:
-        async with session_factory() as session:
-            await PhiRepository(session, key_manager).save_bundle(result.bundle)
-            # Produce a de-identified copy into the separate de-id store. Same
-            # transaction so PHI + its de-identified derivative are atomic.
-            if result.bundle.patient is not None:
-                deid_patient = deidentify_patient(result.bundle.patient)
-                await DeidRepository(session).save(deid_patient)
-            await session.commit()
-    except SQLAlchemyError as exc:
-        logger.error("persist failed: %s", type(exc).__name__)  # never log PHI
-        parsed = result.parsed
-        nack = (
-            ack.build_ack(parsed, ack.AckCode.AE, text="PERSIST_FAILED")
-            if parsed is not None
-            else ack.build_nack_unparseable("PERSIST_FAILED")
-        )
-        return IngestResult(ack.AckCode.AE, nack, reason="PERSIST_FAILED", parsed=parsed)
+    if result.ack_code is ack.AckCode.AA and result.bundle is not None:
+        try:
+            async with session_factory() as session:
+                await PhiRepository(session, key_manager).save_bundle(result.bundle)
+                # De-identified copy into the separate store, same transaction.
+                if result.bundle.patient is not None:
+                    await DeidRepository(session).save(deidentify_patient(result.bundle.patient))
+                await session.commit()
+        except SQLAlchemyError as exc:
+            logger.error("persist failed: %s", type(exc).__name__)  # never log PHI
+            parsed = result.parsed
+            nack = (
+                ack.build_ack(parsed, ack.AckCode.AE, text="PERSIST_FAILED")
+                if parsed is not None
+                else ack.build_nack_unparseable("PERSIST_FAILED")
+            )
+            fail_result = IngestResult(
+                ack.AckCode.AE,
+                nack,
+                reason="PERSIST_FAILED",
+                parsed=parsed,
+                failure_stage=FailureStage.persist,
+            )
+            await _store_dead_letter(session_factory, key_manager, raw, fail_result)
+            return fail_result
+        return result
 
+    # NACK (parse / unsupported / transform): dead-letter the raw message.
+    await _store_dead_letter(session_factory, key_manager, raw, result)
     return result
 
 
