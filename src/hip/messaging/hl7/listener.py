@@ -15,7 +15,6 @@ map-only, which keeps the mapping path testable in isolation.
 from __future__ import annotations
 
 import asyncio
-import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -28,6 +27,7 @@ from hip.messaging.canonical.model import DeadLetterMessage, FailureReason, Fail
 from hip.messaging.hl7 import ack, router
 from hip.messaging.hl7.mllp import MLLPBuffer, wrap
 from hip.messaging.hl7.parser import ParsedMessage, ParseError, parse
+from hip.observability.logging import configure_logging, get_logger
 from hip.persistence.db import make_engine, make_sessionmaker
 from hip.persistence.dead_letter_repo import DeadLetterRepository
 from hip.persistence.deid_repo import DeidRepository
@@ -35,7 +35,7 @@ from hip.persistence.phi_repo import PhiRepository
 from hip.security.deid import deidentify_patient
 from hip.security.keymanager import KeyManager, keymanager_from_env
 
-logger = logging.getLogger("hip.messaging.hl7.listener")
+logger = get_logger("hip.messaging.hl7.listener")
 
 SessionFactory = async_sessionmaker[AsyncSession]
 
@@ -127,13 +127,37 @@ async def _store_dead_letter(
             await DeadLetterRepository(session, key_manager).save(message)
             await session.commit()
     except SQLAlchemyError as exc:
-        logger.error("dead-letter store failed: %s", type(exc).__name__)  # never log PHI
+        logger.error("dead_letter_store_failed", error=type(exc).__name__)  # never log PHI
 
 
 async def ingest(
     raw: str,
     session_factory: SessionFactory | None = None,
     key_manager: KeyManager | None = None,
+) -> IngestResult:
+    """Ingest one message and log the outcome with non-PHI fields only.
+
+    Wraps ``_run_ingest``; the log carries control-plane facts (ack, stage,
+    reason, message-control-id, sending system) — never patient content
+    (docs/TEST_STRATEGY.md no-PHI-in-logs).
+    """
+    result = await _run_ingest(raw, session_factory, key_manager)
+    parsed = result.parsed
+    logger.info(
+        "message_ingested",
+        ack=result.ack_code.value,
+        stage=result.failure_stage.value if result.failure_stage else None,
+        reason=result.reason or None,
+        control_id=parsed.control_id if parsed else None,
+        source=(f"{parsed.sending_application}/{parsed.sending_facility}" if parsed else None),
+    )
+    return result
+
+
+async def _run_ingest(
+    raw: str,
+    session_factory: SessionFactory | None,
+    key_manager: KeyManager | None,
 ) -> IngestResult:
     """Full ingestion: ``process_raw``, then persist an accepted bundle (encrypted)
     or dead-letter an unprocessable one.
@@ -170,7 +194,7 @@ async def ingest(
                     await DeidRepository(session).save(deidentify_patient(result.bundle.patient))
                 await session.commit()
         except SQLAlchemyError as exc:
-            logger.error("persist failed: %s", type(exc).__name__)  # never log PHI
+            logger.error("persist_failed", error=type(exc).__name__)  # never log PHI
             parsed = result.parsed
             nack = (
                 ack.build_ack(parsed, ack.AckCode.AE, text="PERSIST_FAILED")
@@ -222,13 +246,12 @@ class MLLPListener:
         try:
             while data := await reader.read(4096):
                 for message in buffer.feed(data):
+                    # ingest() logs the outcome (non-PHI); write the framed ACK back.
                     result = await ingest(message, self._session_factory, self._key_manager)
-                    # Never log message content — it is PHI (ADR-005).
-                    logger.info("hl7 message from %s -> %s", peer, result.ack_code.value)
                     writer.write(wrap(result.ack_message))
                     await writer.drain()
         except (ConnectionResetError, asyncio.IncompleteReadError):
-            logger.info("connection from %s closed mid-stream", peer)
+            logger.info("connection_closed", peer=str(peer))
         finally:
             writer.close()
 
@@ -236,7 +259,7 @@ class MLLPListener:
         """Start serving and return the asyncio server (caller awaits it)."""
         self._server = await asyncio.start_server(self._handle, self.host, self.port)
         for sock in self._server.sockets or ():
-            logger.info("MLLP listener on %s", sock.getsockname())
+            logger.info("mllp_listener_started", address=str(sock.getsockname()))
         return self._server
 
     async def serve_forever(self) -> None:
@@ -246,7 +269,7 @@ class MLLPListener:
 
 
 async def _main() -> None:  # pragma: no cover - operational entrypoint
-    logging.basicConfig(level=logging.INFO)
+    configure_logging()
     engine = make_engine()
     session_factory = make_sessionmaker(engine)
     key_manager = keymanager_from_env()

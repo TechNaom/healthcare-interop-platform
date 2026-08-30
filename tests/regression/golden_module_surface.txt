@@ -22,6 +22,8 @@ hip.messaging.hl7.mllp
 hip.messaging.hl7.parser
 hip.messaging.hl7.router
 hip.messaging.validator
+hip.observability
+hip.observability.logging
 hip.persistence
 hip.persistence.audit_log
 hip.persistence.db

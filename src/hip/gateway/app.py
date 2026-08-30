@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 from hip import __version__
 from hip.gateway.api import admin, fhir
 from hip.gateway.auth import AuthError, authenticator_from_env
+from hip.observability.logging import configure_logging
 from hip.persistence.db import make_engine, make_sessionmaker
 from hip.security.keymanager import keymanager_from_env
 
@@ -31,6 +32,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     The engine is created lazily-connecting, so building the app never requires a
     reachable database — only routes that actually query one do.
     """
+    configure_logging()
     engine = make_engine()
     app.state.engine = engine
     app.state.session_factory = make_sessionmaker(engine)
