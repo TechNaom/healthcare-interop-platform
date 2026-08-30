@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hip.gateway.auth import Principal
 from hip.gateway.deps import get_key_manager, get_session, require_role
+from hip.gateway.min_necessary import FULL_ACCESS_ROLE, apply_minimum_necessary
 from hip.messaging.canonical import fhir as serialize
 from hip.messaging.canonical import model as m
 from hip.persistence.phi_repo import PhiRepository, StoredResource
@@ -44,8 +45,12 @@ def _operation_outcome(code: str, diagnostics: str, status_code: int) -> JSONRes
     return JSONResponse(body, status_code=status_code, media_type=_FHIR_JSON)
 
 
-def _fhir(resource: dict[str, Any]) -> JSONResponse:
-    return JSONResponse(resource, media_type=_FHIR_JSON)
+def _respond(resource_type: str, resource: dict[str, Any], principal: Principal) -> JSONResponse:
+    """Apply minimum-necessary field filtering, then return FHIR JSON."""
+    filtered = apply_minimum_necessary(
+        resource_type, resource, full_access=principal.has_role(FULL_ACCESS_ROLE)
+    )
+    return JSONResponse(filtered, media_type=_FHIR_JSON)
 
 
 async def _fetch(
@@ -72,7 +77,9 @@ async def read_patient(
     result = await _fetch("Patient", canonical_id, session, principal, key_manager)
     if isinstance(result, JSONResponse):
         return result
-    return _fhir(serialize.to_fhir_patient(m.Patient.model_validate(result.payload)))
+    return _respond(
+        "Patient", serialize.to_fhir_patient(m.Patient.model_validate(result.payload)), principal
+    )
 
 
 @router.get("/Encounter/{canonical_id}")
@@ -83,7 +90,11 @@ async def read_encounter(
     result = await _fetch("Encounter", canonical_id, session, principal, key_manager)
     if isinstance(result, JSONResponse):
         return result
-    return _fhir(serialize.to_fhir_encounter(m.Encounter.model_validate(result.payload)))
+    return _respond(
+        "Encounter",
+        serialize.to_fhir_encounter(m.Encounter.model_validate(result.payload)),
+        principal,
+    )
 
 
 @router.get("/Observation/{canonical_id}")
@@ -94,4 +105,8 @@ async def read_observation(
     result = await _fetch("Observation", canonical_id, session, principal, key_manager)
     if isinstance(result, JSONResponse):
         return result
-    return _fhir(serialize.to_fhir_observation(m.Observation.model_validate(result.payload)))
+    return _respond(
+        "Observation",
+        serialize.to_fhir_observation(m.Observation.model_validate(result.payload)),
+        principal,
+    )

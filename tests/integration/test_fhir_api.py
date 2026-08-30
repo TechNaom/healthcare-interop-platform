@@ -59,11 +59,12 @@ async def _scenario(url: str, adt: str, km: KeyManager) -> dict[str, httpx.Respo
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         path = f"/fhir/Patient/{patient_id}"
         responses = {
-            "ok": await client.get(path, headers=_auth_header("fhir:read")),
+            "ok": await client.get(path, headers=_auth_header("fhir:read", "phi:full")),
+            "limited": await client.get(path, headers=_auth_header("fhir:read")),
             "missing_token": await client.get(path),
             "wrong_role": await client.get(path, headers=_auth_header("billing")),
             "not_found": await client.get(
-                f"/fhir/Patient/{UUID(int=0)}", headers=_auth_header("fhir:read")
+                f"/fhir/Patient/{UUID(int=0)}", headers=_auth_header("fhir:read", "phi:full")
             ),
         }
     await engine.dispose()
@@ -75,13 +76,22 @@ def test_fhir_read_enforces_auth_and_returns_patient(
 ) -> None:
     r = asyncio.run(_scenario(clean_db, adt_a01, key_manager))
 
-    # Authenticated with the right role -> the FHIR Patient.
+    # Full-access clinician -> the complete FHIR Patient.
     assert r["ok"].status_code == 200
     body: dict[str, Any] = r["ok"].json()
     assert body["resourceType"] == "Patient"
     assert body["name"][0]["family"] == "DOE"
     assert body["gender"] == "female"
     assert any(i["value"] == "MRN12345" for i in body["identifier"])
+    assert "address" in body  # full access includes contact info
+
+    # Minimum-necessary: without phi:full, demographics only — no contact info.
+    assert r["limited"].status_code == 200
+    limited: dict[str, Any] = r["limited"].json()
+    assert limited["name"][0]["family"] == "DOE"  # matching demographics kept
+    assert any(i["value"] == "MRN12345" for i in limited["identifier"])
+    assert "address" not in limited  # contact info removed, not blanked
+    assert "telecom" not in limited
 
     # No token -> 401; wrong role -> 403; both as FHIR OperationOutcome.
     assert r["missing_token"].status_code == 401
@@ -120,7 +130,7 @@ async def _read_encounter_and_observation(
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        headers = _auth_header("fhir:read")
+        headers = _auth_header("fhir:read", "phi:full")
         enc = await client.get(f"/fhir/Encounter/{enc_id}", headers=headers)
         obs = await client.get(f"/fhir/Observation/{obs_id}", headers=headers)
     await engine.dispose()

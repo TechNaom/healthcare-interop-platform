@@ -9,6 +9,7 @@ hip.gateway.api.fhir
 hip.gateway.app
 hip.gateway.auth
 hip.gateway.deps
+hip.gateway.min_necessary
 hip.gateway.ratelimit
 hip.messaging
 hip.messaging.canonical
