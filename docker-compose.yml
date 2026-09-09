@@ -1,10 +1,12 @@
 # Local/pilot orchestration — the whole self-hosted stack, one command (ADR-003).
 # Nothing here depends on a cloud provider. All secrets come from .env (copy
-# .env.example -> .env); real values never live in this file or the repo.
+# .env.example -> .env, or run scripts/demo.sh which generates them); real values
+# never live in this file or the repo.
 #
-# Phase 0: infrastructure services are declared so `docker compose up` stands up
-# the supporting stack. The `app` service is present but runs its placeholder
-# command until Phase 1 wires the gateway.
+# The `app` service runs Alembic migrations then serves the FHIR gateway; `mllp`
+# runs the HL7 v2 ingestion listener. keycloak/vault/minio are declared for the
+# full self-hosted architecture (identity/secrets/object-store) and are not yet
+# wired into the app — auth/encryption use env-provided secrets for now.
 
 services:
   db:
@@ -63,6 +65,11 @@ services:
         condition: service_healthy
     environment:
       HIP_ENV: local
+      HIP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-hip}:${POSTGRES_PASSWORD:?}@db:5432/${POSTGRES_DB:-hip}
+      HIP_ENCRYPTION_KEY: ${HIP_ENCRYPTION_KEY:?set HIP_ENCRYPTION_KEY in .env}
+      HIP_BLIND_INDEX_KEY: ${HIP_BLIND_INDEX_KEY:?set HIP_BLIND_INDEX_KEY in .env}
+      HIP_JWT_SECRET: ${HIP_JWT_SECRET:?set HIP_JWT_SECRET in .env}
+    command: ["sh", "-c", "alembic upgrade head && uvicorn hip.gateway.app:app --host 0.0.0.0 --port 8000"]
     ports:
       - "8000:8000"
     healthcheck:
@@ -70,7 +77,22 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 15s
+
+  mllp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      app:
+        condition: service_healthy # app runs the migrations the listener needs
+    environment:
+      HIP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-hip}:${POSTGRES_PASSWORD:?}@db:5432/${POSTGRES_DB:-hip}
+      HIP_ENCRYPTION_KEY: ${HIP_ENCRYPTION_KEY:?}
+      HIP_BLIND_INDEX_KEY: ${HIP_BLIND_INDEX_KEY:?}
+    command: ["python", "-m", "hip.messaging.hl7.listener"]
+    ports:
+      - "2575:2575"
 
 volumes:
   db_data:

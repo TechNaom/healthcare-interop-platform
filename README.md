@@ -2,9 +2,29 @@
 
 A HIPAA-aligned HL7 v2 + FHIR (R4/R5) data integration platform. **Python-only for the current build** — orchestration, API surface, and validation/transform. C++ high-throughput validation is a documented future phase, not current scope (see [ADR-006](docs/DECISIONS.md#adr-006)). Containers as the deployable unit on any OS or cloud.
 
-## Status: Kickoff questions resolved — 12-week AI-orchestrated track, Phase 0 starting
+## Status: pilot build in progress — runnable end to end
 
-Every document below is written and internally consistent. Kickoff questions (track length, synthetic-data-only policy, GitHub remote) were resolved 2026-08-24 — see [Open Questions](<Healthcare Interop Platform.md#open-questions-from-kickoff-review>) for the record. Phase 0 (repo scaffold + canonical model spec) is next.
+The core pipeline works end to end and is CI-verified: **HL7 v2 over MLLP → parse/route/map to the canonical model → encrypted persistence + append-only audit → de-identified copy → FHIR R4 API (read/write/search) with JWT auth, RBAC and minimum-necessary field filtering**. See [PROJECT_STATE.md](PROJECT_STATE.md) for the current phase detail and what's still ahead.
+
+## Run the demo
+
+One command stands up Postgres + the FHIR gateway (migrations run automatically) and exercises create/read/search with a throwaway local key set:
+
+```bash
+./scripts/demo.sh          # build + start db+gateway, then create/read/search a Patient
+./scripts/demo.sh down     # tear it all down
+```
+
+Expected output:
+
+```text
+health   : {'status': 'ok', 'version': '0.0.0'}
+create   : 201 /fhir/Patient/<uuid>
+read     : 200 DEMO
+search   : 200 total = 1
+```
+
+Requires Docker + `uv`. The generated `.env` holds **local-only** keys (gitignored); production secrets come from Vault. HL7 ingestion also listens on MLLP port 2575 (`mllp` service).
 
 ## Documentation map
 

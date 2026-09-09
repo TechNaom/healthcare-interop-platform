@@ -1,9 +1,8 @@
 # Multi-stage, multi-arch build (ADR-003). Base pinned to Python 3.12 (ADR-006).
 # Build with buildx for linux/amd64 + linux/arm64:
 #   docker buildx build --platform linux/amd64,linux/arm64 -t hip:local .
-#
-# NOTE (Phase 0): the app has no runtime deps yet, so `uv sync` installs only the
-# project itself. Real service dependencies land in the phase that builds them.
+# Runtime deps come from the lockfile (uv sync --no-dev); the image also carries
+# the Alembic migrations so it can create/upgrade its own schema on start.
 
 # --- builder ---------------------------------------------------------------
 FROM python:3.12-slim AS builder
@@ -39,6 +38,9 @@ RUN useradd --system --create-home --uid 10001 appuser
 WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/src /app/src
+# Migrations + Alembic config so the container can run `alembic upgrade head`.
+COPY alembic.ini ./
+COPY migrations ./migrations
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
