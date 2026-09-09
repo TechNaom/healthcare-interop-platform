@@ -15,18 +15,29 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hip.messaging.canonical import model as m
 from hip.messaging.canonical.mapper import CanonicalBundle
 from hip.persistence.audit_log import AuditLog
-from hip.persistence.models import PhiResource
+from hip.persistence.models import PhiIdentifierIndex, PhiResource
+from hip.security.blind_index import BlindIndexer
 from hip.security.keymanager import KeyManager
 
 # System actor used when ingestion writes on the pipeline's behalf (no end user).
 SYSTEM_ACTOR = "system:ingestion"
+
+
+def _index_values(resource: m.CanonicalResource) -> list[str]:
+    """Identifier values of a resource to blind-index for search."""
+    values = [i.value for i in resource.identifiers]
+    if isinstance(resource, m.Patient) and resource.account_number is not None:
+        values.append(resource.account_number.value)
+    if isinstance(resource, m.Encounter):
+        values += [i.value for i in (resource.visit_number, resource.account_number) if i]
+    return values
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,10 +51,46 @@ class StoredResource:
 
 
 class PhiRepository:
-    def __init__(self, session: AsyncSession, key_manager: KeyManager) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        key_manager: KeyManager,
+        blind_indexer: BlindIndexer | None = None,
+    ) -> None:
         self._session = session
         self._audit = AuditLog(session)
         self._keys = key_manager
+        self._blind = blind_indexer
+
+    async def _reindex(self, resource: m.CanonicalResource, resource_type: str) -> None:
+        """Refresh the blind-index rows for a resource (delete + re-insert)."""
+        if self._blind is None:
+            return
+        await self._session.execute(
+            delete(PhiIdentifierIndex).where(
+                PhiIdentifierIndex.canonical_id == resource.canonical_id
+            )
+        )
+        for value in _index_values(resource):
+            self._session.add(
+                PhiIdentifierIndex(
+                    canonical_id=resource.canonical_id,
+                    resource_type=resource_type,
+                    identifier_hash=self._blind.index(value),
+                )
+            )
+
+    async def find_ids_by_identifier(self, resource_type: str, value: str) -> list[UUID]:
+        """Return canonical ids whose blind-indexed identifier matches ``value``."""
+        if self._blind is None:
+            return []
+        result = await self._session.execute(
+            select(PhiIdentifierIndex.canonical_id).where(
+                PhiIdentifierIndex.resource_type == resource_type,
+                PhiIdentifierIndex.identifier_hash == self._blind.index(value),
+            )
+        )
+        return list(result.scalars())
 
     def _encrypt(self, payload: dict[str, Any]) -> bytes:
         return self._keys.encrypt(json.dumps(payload, separators=(",", ":")).encode())
@@ -69,6 +116,7 @@ class PhiRepository:
             },
         )
         await self._session.execute(stmt)
+        await self._reindex(resource, resource_type)
         await self._audit.record(
             action="create",
             resource_type=resource_type,

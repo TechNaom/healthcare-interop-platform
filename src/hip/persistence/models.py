@@ -89,6 +89,23 @@ class DeidResource(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class PhiIdentifierIndex(Base):
+    """Blind-index rows for exact-match search over encrypted PHI.
+
+    Each stored resource's identifiers are recorded here as keyed HMAC digests
+    (``identifier_hash``) so search never touches the encrypted payload and the
+    plaintext identifier is never stored in a searchable column
+    (docs/DATA_MODEL.md; hip.security.blind_index).
+    """
+
+    __tablename__ = "phi_identifier_index"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    canonical_id: Mapped[UUID] = mapped_column(index=True)
+    resource_type: Mapped[str] = mapped_column(String(64), index=True)
+    identifier_hash: Mapped[str] = mapped_column(String(64), index=True)
+
+
 class DeadLetterRow(Base):
     """An unprocessable inbound message (docs/DATA_MODEL.md DeadLetterMessage).
 

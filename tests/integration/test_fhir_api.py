@@ -202,3 +202,45 @@ def test_create_patient_then_read_back(clean_db: str, key_manager: KeyManager) -
 
     # Write requires the write role.
     assert forbidden.status_code == 403
+
+
+async def _create_then_search(
+    url: str, km: KeyManager, bi: object
+) -> tuple[httpx.Response, httpx.Response]:
+    engine = make_engine(url)
+    session_factory = make_sessionmaker(engine)
+    app = create_app()
+    app.state.engine = engine
+    app.state.session_factory = session_factory
+    app.state.authenticator = TokenAuthenticator(secret=_SECRET)
+    app.state.key_manager = km
+    app.state.blind_indexer = bi
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.post("/fhir/Patient", json=_NEW_PATIENT, headers=_auth_header("fhir:write"))
+        hit = await client.get(
+            "/fhir/Patient?identifier=HOSP|MRN-NEW", headers=_auth_header("fhir:read", "phi:full")
+        )
+        miss = await client.get(
+            "/fhir/Patient?identifier=NOPE", headers=_auth_header("fhir:read", "phi:full")
+        )
+    await engine.dispose()
+    return hit, miss
+
+
+def test_search_patient_by_identifier(
+    clean_db: str, key_manager: KeyManager, blind_indexer: object
+) -> None:
+    hit, miss = asyncio.run(_create_then_search(clean_db, key_manager, blind_indexer))
+
+    assert hit.status_code == 200
+    bundle = hit.json()
+    assert bundle["resourceType"] == "Bundle"
+    assert bundle["type"] == "searchset"
+    assert bundle["total"] == 1
+    assert bundle["entry"][0]["resource"]["name"][0]["family"] == "ROE"
+
+    # A non-matching identifier returns an empty searchset (not a 404).
+    assert miss.status_code == 200
+    assert miss.json()["total"] == 0

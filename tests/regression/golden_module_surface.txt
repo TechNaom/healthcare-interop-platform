@@ -35,6 +35,7 @@ hip.persistence.phi_repo
 hip.platform
 hip.platform.paths
 hip.security
+hip.security.blind_index
 hip.security.deid
 hip.security.keymanager
 hip.security.objectstore

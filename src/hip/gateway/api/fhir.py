@@ -16,12 +16,19 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hip.gateway.auth import Principal
-from hip.gateway.deps import get_key_manager, get_session, require_role
+from hip.gateway.deps import (
+    get_blind_indexer,
+    get_key_manager,
+    get_optional_blind_indexer,
+    get_session,
+    require_role,
+)
 from hip.gateway.min_necessary import FULL_ACCESS_ROLE, apply_minimum_necessary
 from hip.messaging.canonical import fhir as serialize
 from hip.messaging.canonical import model as m
 from hip.messaging.canonical.fhir import FhirParseError
 from hip.persistence.phi_repo import PhiRepository, StoredResource
+from hip.security.blind_index import BlindIndexer
 from hip.security.keymanager import KeyManager
 
 router = APIRouter(prefix="/fhir", tags=["fhir"])
@@ -37,6 +44,8 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 PrincipalDep = Annotated[Principal, Depends(require_role(_READ_ROLE))]
 WritePrincipalDep = Annotated[Principal, Depends(require_role(_WRITE_ROLE))]
 KeyDep = Annotated[KeyManager, Depends(get_key_manager)]
+BlindDep = Annotated[BlindIndexer, Depends(get_blind_indexer)]
+OptBlindDep = Annotated[BlindIndexer | None, Depends(get_optional_blind_indexer)]
 
 
 def _operation_outcome(code: str, diagnostics: str, status_code: int) -> JSONResponse:
@@ -69,6 +78,42 @@ async def _fetch(
     if stored is None or stored.resource_type != resource_type:
         return _operation_outcome("not-found", f"{resource_type}/{canonical_id} not found", 404)
     return stored
+
+
+@router.get("/Patient")
+async def search_patient(
+    session: SessionDep,
+    principal: PrincipalDep,
+    key_manager: KeyDep,
+    blind_indexer: BlindDep,
+    identifier: str,
+) -> JSONResponse:
+    """Search patients by identifier via the blind index. Returns a FHIR Bundle.
+
+    ``identifier`` may be ``system|value`` or a bare ``value``; the value is
+    matched exactly against the HMAC index (no plaintext hits the query).
+    """
+    value = identifier.rsplit("|", 1)[-1]
+    repo = PhiRepository(session, key_manager, blind_indexer)
+    ids = await repo.find_ids_by_identifier("Patient", value)
+
+    full = principal.has_role(FULL_ACCESS_ROLE)
+    entries: list[dict[str, Any]] = []
+    for canonical_id in ids:
+        stored = await repo.get(canonical_id, actor=principal.subject)
+        if stored is None:
+            continue
+        resource = serialize.to_fhir_patient(m.Patient.model_validate(stored.payload))
+        entries.append({"resource": apply_minimum_necessary("Patient", resource, full_access=full)})
+    await session.commit()
+
+    bundle: dict[str, Any] = {
+        "resourceType": "Bundle",
+        "type": "searchset",
+        "total": len(entries),
+        "entry": entries,
+    }
+    return JSONResponse(bundle, media_type=_FHIR_JSON)
 
 
 @router.get("/Patient/{canonical_id}")
@@ -119,6 +164,7 @@ async def create_patient(
     session: SessionDep,
     principal: WritePrincipalDep,
     key_manager: KeyDep,
+    blind_indexer: OptBlindDep,
     body: Annotated[dict[str, Any], Body(media_type=_FHIR_JSON)],
 ) -> JSONResponse:
     """Create a Patient from a FHIR R4 body. 201 + Location, or 400 on invalid FHIR."""
@@ -127,7 +173,7 @@ async def create_patient(
     except FhirParseError as exc:
         return _operation_outcome("invalid", f"invalid FHIR Patient: {exc}", 400)
 
-    await PhiRepository(session, key_manager).save(patient, actor=principal.subject)
+    await PhiRepository(session, key_manager, blind_indexer).save(patient, actor=principal.subject)
     await session.commit()
 
     created = serialize.to_fhir_patient(patient)

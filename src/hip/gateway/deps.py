@@ -15,6 +15,7 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hip.gateway.auth import AuthError, Principal, TokenAuthenticator
+from hip.security.blind_index import BlindIndexer
 from hip.security.keymanager import KeyManager
 
 
@@ -31,6 +32,20 @@ def get_key_manager(request: Request) -> KeyManager:
     if key_manager is None:
         raise AuthError(500, "exception", "encryption is not configured")
     return key_manager
+
+
+def get_optional_blind_indexer(request: Request) -> BlindIndexer | None:
+    """The blind indexer if configured, else None (writes just skip indexing)."""
+    indexer: BlindIndexer | None = getattr(request.app.state, "blind_indexer", None)
+    return indexer
+
+
+def get_blind_indexer(request: Request) -> BlindIndexer:
+    """The blind indexer, or fail closed (search unavailable) if not configured."""
+    indexer = get_optional_blind_indexer(request)
+    if indexer is None:
+        raise AuthError(503, "not-supported", "search is not configured")
+    return indexer
 
 
 async def get_principal(request: Request) -> Principal:

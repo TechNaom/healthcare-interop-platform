@@ -32,6 +32,7 @@ from hip.persistence.db import make_engine, make_sessionmaker
 from hip.persistence.dead_letter_repo import DeadLetterRepository
 from hip.persistence.deid_repo import DeidRepository
 from hip.persistence.phi_repo import PhiRepository
+from hip.security.blind_index import BlindIndexer, blind_indexer_from_env
 from hip.security.deid import deidentify_patient
 from hip.security.keymanager import KeyManager, keymanager_from_env
 
@@ -134,6 +135,7 @@ async def ingest(
     raw: str,
     session_factory: SessionFactory | None = None,
     key_manager: KeyManager | None = None,
+    blind_indexer: BlindIndexer | None = None,
 ) -> IngestResult:
     """Ingest one message and log the outcome with non-PHI fields only.
 
@@ -141,7 +143,7 @@ async def ingest(
     reason, message-control-id, sending system) — never patient content
     (docs/TEST_STRATEGY.md no-PHI-in-logs).
     """
-    result = await _run_ingest(raw, session_factory, key_manager)
+    result = await _run_ingest(raw, session_factory, key_manager, blind_indexer)
     parsed = result.parsed
     logger.info(
         "message_ingested",
@@ -158,6 +160,7 @@ async def _run_ingest(
     raw: str,
     session_factory: SessionFactory | None,
     key_manager: KeyManager | None,
+    blind_indexer: BlindIndexer | None,
 ) -> IngestResult:
     """Full ingestion: ``process_raw``, then persist an accepted bundle (encrypted)
     or dead-letter an unprocessable one.
@@ -188,7 +191,7 @@ async def _run_ingest(
     if result.ack_code is ack.AckCode.AA and result.bundle is not None:
         try:
             async with session_factory() as session:
-                await PhiRepository(session, key_manager).save_bundle(result.bundle)
+                await PhiRepository(session, key_manager, blind_indexer).save_bundle(result.bundle)
                 # De-identified copy into the separate store, same transaction.
                 if result.bundle.patient is not None:
                     await DeidRepository(session).save(deidentify_patient(result.bundle.patient))
@@ -231,6 +234,7 @@ class MLLPListener:
         *,
         session_factory: SessionFactory | None = None,
         key_manager: KeyManager | None = None,
+        blind_indexer: BlindIndexer | None = None,
     ) -> None:
         # Binding all interfaces is the point of a network listener; exposure is
         # controlled at the container/network boundary. Hence the S104/B104 waivers.
@@ -238,6 +242,7 @@ class MLLPListener:
         self.port = port
         self._session_factory = session_factory
         self._key_manager = key_manager
+        self._blind_indexer = blind_indexer
         self._server: asyncio.Server | None = None
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -247,7 +252,9 @@ class MLLPListener:
             while data := await reader.read(4096):
                 for message in buffer.feed(data):
                     # ingest() logs the outcome (non-PHI); write the framed ACK back.
-                    result = await ingest(message, self._session_factory, self._key_manager)
+                    result = await ingest(
+                        message, self._session_factory, self._key_manager, self._blind_indexer
+                    )
                     writer.write(wrap(result.ack_message))
                     await writer.drain()
         except (ConnectionResetError, asyncio.IncompleteReadError):
@@ -272,8 +279,11 @@ async def _main() -> None:  # pragma: no cover - operational entrypoint
     configure_logging()
     engine = make_engine()
     session_factory = make_sessionmaker(engine)
-    key_manager = keymanager_from_env()
-    await MLLPListener(session_factory=session_factory, key_manager=key_manager).serve_forever()
+    await MLLPListener(
+        session_factory=session_factory,
+        key_manager=keymanager_from_env(),
+        blind_indexer=blind_indexer_from_env(),
+    ).serve_forever()
 
 
 if __name__ == "__main__":  # pragma: no cover

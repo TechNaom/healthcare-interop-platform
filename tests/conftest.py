@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pytest
 
+from hip.security.blind_index import BlindIndexer
 from hip.security.keymanager import KeyManager
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -75,7 +76,10 @@ async def _truncate(url: str) -> None:
     engine = make_engine(url)
     async with engine.begin() as conn:
         await conn.execute(
-            text("TRUNCATE phi_resources, audit_events, deid_resources, dead_letter_messages")
+            text(
+                "TRUNCATE phi_resources, audit_events, deid_resources, "
+                "dead_letter_messages, phi_identifier_index"
+            )
         )
     await engine.dispose()
 
@@ -93,6 +97,14 @@ def key_manager() -> KeyManager:
     from hip.security.keymanager import FernetKeyManager
 
     return FernetKeyManager(FernetKeyManager.generate_key())
+
+
+@pytest.fixture(scope="session")
+def blind_indexer() -> BlindIndexer:
+    """A stable test blind indexer (HMAC) for identifier search."""
+    from hip.security.blind_index import HmacBlindIndexer
+
+    return HmacBlindIndexer(b"test-blind-index-key")
 
 
 # --------------------------------------------------------------------------- #
