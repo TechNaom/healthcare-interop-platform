@@ -27,7 +27,7 @@ async def _create_login_role(owner_url: str, role: str, grants: list[str]) -> No
     engine = make_engine(owner_url)
     async with engine.connect() as conn:
         auto = await conn.execution_options(isolation_level="AUTOCOMMIT")
-        await auto.execute(text(f'CREATE ROLE "{role}" LOGIN PASSWORD \'{_PW}\''))
+        await auto.execute(text(f"CREATE ROLE \"{role}\" LOGIN PASSWORD '{_PW}'"))
         await auto.execute(text(f'GRANT USAGE ON SCHEMA public TO "{role}"'))
         for grant in grants:
             await auto.execute(text(grant))
