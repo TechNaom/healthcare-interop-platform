@@ -159,6 +159,24 @@ async def read_observation(
     )
 
 
+async def _persist_created(  # noqa: PLR0913, PLR0917 - cohesive create helper for 3 routes
+    resource: m.CanonicalResource,
+    resource_type: str,
+    fhir_body: dict[str, Any],
+    session: AsyncSession,
+    principal: Principal,
+    key_manager: KeyManager,
+    blind_indexer: BlindIndexer | None,
+) -> JSONResponse:
+    """Persist a newly-mapped resource (encrypted + audited) and return 201."""
+    await PhiRepository(session, key_manager, blind_indexer).save(resource, actor=principal.subject)
+    await session.commit()
+    location = f"/fhir/{resource_type}/{resource.canonical_id}"
+    return JSONResponse(
+        fhir_body, status_code=201, media_type=_FHIR_JSON, headers={"Location": location}
+    )
+
+
 @router.post("/Patient", status_code=201)
 async def create_patient(
     session: SessionDep,
@@ -172,12 +190,45 @@ async def create_patient(
         patient = serialize.from_fhir_patient(body)
     except FhirParseError as exc:
         return _operation_outcome("invalid", f"invalid FHIR Patient: {exc}", 400)
-
-    await PhiRepository(session, key_manager, blind_indexer).save(patient, actor=principal.subject)
-    await session.commit()
-
     created = serialize.to_fhir_patient(patient)
-    location = f"/fhir/Patient/{patient.canonical_id}"
-    return JSONResponse(
-        created, status_code=201, media_type=_FHIR_JSON, headers={"Location": location}
+    return await _persist_created(
+        patient, "Patient", created, session, principal, key_manager, blind_indexer
+    )
+
+
+@router.post("/Encounter", status_code=201)
+async def create_encounter(
+    session: SessionDep,
+    principal: WritePrincipalDep,
+    key_manager: KeyDep,
+    blind_indexer: OptBlindDep,
+    body: Annotated[dict[str, Any], Body(media_type=_FHIR_JSON)],
+) -> JSONResponse:
+    """Create an Encounter from a FHIR R4 body. 201 + Location, or 400 on invalid FHIR."""
+    try:
+        encounter = serialize.from_fhir_encounter(body)
+    except FhirParseError as exc:
+        return _operation_outcome("invalid", f"invalid FHIR Encounter: {exc}", 400)
+    created = serialize.to_fhir_encounter(encounter)
+    return await _persist_created(
+        encounter, "Encounter", created, session, principal, key_manager, blind_indexer
+    )
+
+
+@router.post("/Observation", status_code=201)
+async def create_observation(
+    session: SessionDep,
+    principal: WritePrincipalDep,
+    key_manager: KeyDep,
+    blind_indexer: OptBlindDep,
+    body: Annotated[dict[str, Any], Body(media_type=_FHIR_JSON)],
+) -> JSONResponse:
+    """Create an Observation from a FHIR R4 body. 201 + Location, or 400 on invalid FHIR."""
+    try:
+        observation = serialize.from_fhir_observation(body)
+    except FhirParseError as exc:
+        return _operation_outcome("invalid", f"invalid FHIR Observation: {exc}", 400)
+    created = serialize.to_fhir_observation(observation)
+    return await _persist_created(
+        observation, "Observation", created, session, principal, key_manager, blind_indexer
     )

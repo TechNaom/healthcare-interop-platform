@@ -7,7 +7,13 @@ from datetime import date
 import pytest
 
 from hip.messaging.canonical import model as m
-from hip.messaging.canonical.fhir import FhirParseError, from_fhir_patient, to_fhir_patient
+from hip.messaging.canonical.fhir import (
+    FhirParseError,
+    from_fhir_encounter,
+    from_fhir_observation,
+    from_fhir_patient,
+    to_fhir_patient,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -55,3 +61,42 @@ def test_partial_birthdate_is_dropped_not_crashing() -> None:
 def test_invalid_fhir_raises() -> None:
     with pytest.raises(FhirParseError):
         from_fhir_patient({"resourceType": "Patient", "name": "not-a-list"})
+
+
+def test_encounter_reverse_maps() -> None:
+    enc = from_fhir_encounter(
+        {
+            "resourceType": "Encounter",
+            "status": "in-progress",
+            "class": {"code": "IMP", "system": "x"},
+            "identifier": [{"value": "V9"}],
+            "period": {"start": "2026-08-25T10:00:00Z"},
+        }
+    )
+    assert enc.status is m.EncounterStatus.in_progress
+    assert enc.encounter_class is not None and enc.encounter_class.code == "IMP"
+    assert enc.visit_number is not None and enc.visit_number.value == "V9"
+    assert enc.period is not None and enc.period.start is not None
+
+
+def test_observation_reverse_maps_polymorphic_value() -> None:
+    obs = from_fhir_observation(
+        {
+            "resourceType": "Observation",
+            "status": "final",
+            "code": {"coding": [{"code": "2339-0", "display": "Glucose"}]},
+            "valueQuantity": {"value": 5.4, "unit": "mmol/L"},
+            "interpretation": [{"coding": [{"code": "H"}]}],
+            "referenceRange": [{"text": "3.9-5.8"}],
+        }
+    )
+    assert obs.status is m.ObservationStatus.final
+    assert obs.observation_code.coding[0].code == "2339-0"
+    assert isinstance(obs.value, m.Quantity) and obs.value.value == 5.4
+    assert obs.interpretation == ["H"]
+    assert obs.reference_range == "3.9-5.8"
+
+
+def test_observation_missing_required_fields_rejected() -> None:
+    with pytest.raises(FhirParseError):
+        from_fhir_observation({"resourceType": "Observation"})  # status + code are 1..1

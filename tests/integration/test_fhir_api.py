@@ -244,3 +244,52 @@ def test_search_patient_by_identifier(
     # A non-matching identifier returns an empty searchset (not a 404).
     assert miss.status_code == 200
     assert miss.json()["total"] == 0
+
+
+_NEW_ENCOUNTER: dict[str, Any] = {
+    "resourceType": "Encounter",
+    "status": "in-progress",
+    "class": {"code": "IMP", "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode"},
+    "identifier": [{"value": "VISIT-1"}],
+}
+
+_NEW_OBSERVATION: dict[str, Any] = {
+    "resourceType": "Observation",
+    "status": "final",
+    "code": {"coding": [{"code": "2339-0", "system": "http://loinc.org", "display": "Glucose"}]},
+    "valueQuantity": {"value": 5.4, "unit": "mmol/L"},
+}
+
+
+async def _create_read(url: str, km: KeyManager, path: str, body: dict[str, Any]) -> httpx.Response:
+    engine = make_engine(url)
+    session_factory = make_sessionmaker(engine)
+    app = create_app()
+    app.state.engine = engine
+    app.state.session_factory = session_factory
+    app.state.authenticator = TokenAuthenticator(secret=_SECRET)
+    app.state.key_manager = km
+    app.state.blind_indexer = None
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await client.post(path, json=body, headers=_auth_header("fhir:write"))
+        location = created.headers.get("Location", "")
+        assert created.status_code == 201, created.text
+        read = await client.get(location, headers=_auth_header("fhir:read", "phi:full"))
+    await engine.dispose()
+    return read
+
+
+def test_create_encounter_then_read(clean_db: str, key_manager: KeyManager) -> None:
+    read = asyncio.run(_create_read(clean_db, key_manager, "/fhir/Encounter", _NEW_ENCOUNTER))
+    assert read.status_code == 200
+    assert read.json()["resourceType"] == "Encounter"
+    assert read.json()["status"] == "in-progress"
+
+
+def test_create_observation_then_read(clean_db: str, key_manager: KeyManager) -> None:
+    read = asyncio.run(_create_read(clean_db, key_manager, "/fhir/Observation", _NEW_OBSERVATION))
+    assert read.status_code == 200
+    assert read.json()["resourceType"] == "Observation"
+    assert read.json()["valueQuantity"]["value"] == 5.4

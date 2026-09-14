@@ -352,3 +352,82 @@ def from_fhir_patient(data: dict[str, Any]) -> m.Patient:
         deceased=data.get("deceasedBoolean"),
         deceased_datetime=_datetime_in(data.get("deceasedDateTime")),
     )
+
+
+def _coding_in(data: dict[str, Any]) -> m.Coding:
+    return m.Coding(
+        code=data.get("code", ""), system=data.get("system"), display=data.get("display")
+    )
+
+
+def _codeable_concept_in(data: dict[str, Any]) -> m.CodeableConcept:
+    return m.CodeableConcept(
+        coding=[_coding_in(c) for c in data.get("coding", []) if c.get("code")],
+        text=data.get("text"),
+    )
+
+
+def _period_in(data: dict[str, Any] | None) -> m.Period | None:
+    if not data:
+        return None
+    return m.Period(start=_datetime_in(data.get("start")), end=_datetime_in(data.get("end")))
+
+
+def from_fhir_encounter(data: dict[str, Any]) -> m.Encounter:
+    """Map an incoming FHIR R4 Encounter to a new canonical Encounter (fresh id)."""
+    try:
+        FHIREncounter.model_validate(data)
+    except ValidationError as exc:
+        raise FhirParseError(str(exc)) from exc
+
+    identifiers = data.get("identifier", [])
+    fhir_class = data.get("class")
+    return m.Encounter(
+        status=_enum_or_none(m.EncounterStatus, data.get("status")),
+        encounter_class=_coding_in(fhir_class) if fhir_class and fhir_class.get("code") else None,
+        visit_number=_identifier_in(identifiers[0]) if identifiers else None,
+        period=_period_in(data.get("period")),
+    )
+
+
+def _observation_value_in(data: dict[str, Any]) -> m.ObservationValue | None:
+    """Read the FHIR value[x] field back into a canonical polymorphic value."""
+    if "valueQuantity" in data:
+        quantity = data["valueQuantity"]
+        return m.Quantity(
+            value=float(quantity["value"]),
+            unit=quantity.get("unit"),
+            comparator=quantity.get("comparator"),
+        )
+    if "valueCodeableConcept" in data:
+        return _codeable_concept_in(data["valueCodeableConcept"])
+    if "valueDateTime" in data:
+        return _datetime_in(data["valueDateTime"])
+    if "valueBoolean" in data:
+        return bool(data["valueBoolean"])
+    if "valueString" in data:
+        return str(data["valueString"])
+    return None
+
+
+def from_fhir_observation(data: dict[str, Any]) -> m.Observation:
+    """Map an incoming FHIR R4 Observation to a new canonical Observation (fresh id)."""
+    try:
+        FHIRObservation.model_validate(data)
+    except ValidationError as exc:
+        raise FhirParseError(str(exc)) from exc
+
+    ranges = data.get("referenceRange") or []
+    return m.Observation(
+        observation_code=_codeable_concept_in(data.get("code", {})),
+        status=_enum_or_none(m.ObservationStatus, data.get("status")),
+        value=_observation_value_in(data),
+        effective_time=_datetime_in(data.get("effectiveDateTime")),
+        interpretation=[
+            coding["code"]
+            for interp in data.get("interpretation", [])
+            for coding in interp.get("coding", [])
+            if coding.get("code")
+        ],
+        reference_range=ranges[0].get("text") if ranges else None,
+    )
