@@ -25,8 +25,13 @@ services:
       timeout: 5s
       retries: 5
 
+  # keycloak/vault/minio are the full self-hosted architecture but aren't wired
+  # into the app yet (auth/encryption use env secrets for now). They're behind the
+  # "infra" profile so the default `docker compose up` brings up only the working
+  # core (db + app + mllp). Add them with: docker compose --profile infra up
   keycloak:
     image: quay.io/keycloak/keycloak:26.0
+    profiles: ["infra"]
     command: start-dev
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
@@ -36,6 +41,7 @@ services:
 
   vault:
     image: hashicorp/vault:1.18
+    profiles: ["infra"]
     cap_add:
       - IPC_LOCK
     environment:
@@ -46,6 +52,7 @@ services:
 
   minio:
     image: minio/minio:latest
+    profiles: ["infra"]
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-hip}
