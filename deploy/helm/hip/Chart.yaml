@@ -1,0 +1,14 @@
+apiVersion: v2
+name: hip
+description: >-
+  HIPAA-aligned HL7 v2 + FHIR (R4/R5) interoperability platform — FHIR gateway
+  and HL7 MLLP listener. Deploy to the client's own Kubernetes (ADR-003); no
+  cloud-vendor dependency. Point at the client's Postgres and secrets store.
+type: application
+version: 0.1.0
+appVersion: "0.0.0"
+keywords:
+  - fhir
+  - hl7
+  - healthcare
+  - interoperability

@@ -1,0 +1,70 @@
+# Values for the HIP chart. Override per environment; never commit real secrets.
+# The client points `database.url` at their managed Postgres and supplies the
+# encryption / blind-index / JWT secrets from their secret store (ADR-003).
+
+image:
+  repository: healthcare-interop-platform-app
+  tag: "" # defaults to .Chart.appVersion
+  pullPolicy: IfNotPresent
+
+# Alembic migrations run as a pre-upgrade/pre-install Job before the gateway.
+migrations:
+  enabled: true
+
+gateway:
+  replicaCount: 2
+  port: 8000
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 75
+
+mllp:
+  enabled: true
+  replicaCount: 1
+  port: 2575
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+# Non-secret config.
+config:
+  logJson: "1"
+  rateLimit: "600"
+  rateWindowSeconds: "60"
+
+# Database connection. Prefer `existingSecret` (a Secret with key `database-url`)
+# so the URL never lands in values. `url` is a convenience for dev only.
+database:
+  existingSecret: ""
+  url: ""
+
+# App secrets. In production reference an existing Secret (from Vault/External
+# Secrets); the inline values are for non-prod only and must stay empty in git.
+secrets:
+  existingSecret: "" # Secret with keys: encryption-key, blind-index-key, jwt-secret
+  encryptionKey: ""
+  blindIndexKey: ""
+  jwtSecret: ""
+  # Or, for real OIDC, a JWKS/public key instead of a shared secret:
+  jwtPublicKey: ""
+
+ingress:
+  enabled: false
+  className: ""
+  host: hip.example.com
+  tls: false
+
+serviceAccount:
+  create: true
+  name: ""
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  seccompProfile:
+    type: RuntimeDefault

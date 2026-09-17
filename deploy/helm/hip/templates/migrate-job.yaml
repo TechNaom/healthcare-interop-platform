@@ -1,0 +1,33 @@
+{{- if .Values.migrations.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-migrate" (include "hip.fullname" .) }}
+  labels:
+    {{- include "hip.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrate
+  annotations:
+    # Run migrations before the app rolls out (install and upgrade).
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "hip.labels" . | nindent 8 }}
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "hip.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: migrate
+          image: {{ include "hip.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["alembic", "upgrade", "head"]
+          env:
+            {{- include "hip.env" . | nindent 12 }}
+{{- end }}
