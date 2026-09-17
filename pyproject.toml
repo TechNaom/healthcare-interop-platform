@@ -20,6 +20,9 @@ dependencies = [
     "fhir-resources>=8.0",
     "pyjwt[crypto]>=2.9",
     "structlog>=24.1",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-prometheus>=0.48b0",
+    "prometheus-client>=0.20",
 ]
 
 [project.optional-dependencies]

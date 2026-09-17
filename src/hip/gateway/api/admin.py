@@ -9,9 +9,10 @@ dependency checks (DB, Keycloak) as those land, and report 503 until they pass.
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 
 from hip import __version__
+from hip.observability.metrics import render_latest
 
 router = APIRouter(tags=["admin"])
 
@@ -31,3 +32,10 @@ def readyz() -> dict[str, str]:
     503 until they pass — that is the intended shape, not an afterthought.
     """
     return {"status": "ready", "version": __version__, "checks": "none-yet"}
+
+
+@router.get("/metrics")
+def metrics() -> Response:
+    """Prometheus metrics exposition (scrape target). Carries no PHI."""
+    payload, content_type = render_latest()
+    return Response(content=payload, media_type=content_type)

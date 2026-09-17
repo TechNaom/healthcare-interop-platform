@@ -11,6 +11,7 @@ In container:  uvicorn hip.gateway.app:app --host 0.0.0.0 --port 8000
 
 from __future__ import annotations
 
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
@@ -22,12 +23,13 @@ from hip.gateway.api import admin, fhir
 from hip.gateway.auth import AuthError, authenticator_from_env
 from hip.gateway.ratelimit import rate_limiter_from_env
 from hip.observability.logging import configure_logging
+from hip.observability.metrics import RequestMetrics, configure_metrics
 from hip.persistence.db import make_engine, make_sessionmaker
 from hip.security.blind_index import blind_indexer_from_env
 from hip.security.keymanager import keymanager_from_env
 
-# Liveness/readiness/schema endpoints are never throttled.
-_UNTHROTTLED = frozenset({"/healthz", "/readyz", "/openapi.json", "/docs", "/redoc"})
+# Liveness/readiness/schema/metrics endpoints are not throttled or metered.
+_UNMETERED = frozenset({"/healthz", "/readyz", "/metrics", "/openapi.json", "/docs", "/redoc"})
 
 
 @asynccontextmanager
@@ -38,6 +40,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     reachable database — only routes that actually query one do.
     """
     configure_logging()
+    configure_metrics()
     engine = make_engine()
     app.state.engine = engine
     app.state.session_factory = make_sessionmaker(engine)
@@ -45,6 +48,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.key_manager = keymanager_from_env()
     app.state.blind_indexer = blind_indexer_from_env()
     app.state.rate_limiter = rate_limiter_from_env()
+    app.state.request_metrics = RequestMetrics()
     try:
         yield
     finally:
@@ -73,25 +77,42 @@ def create_app() -> FastAPI:
     app.add_exception_handler(AuthError, _auth_error_handler)
 
     @app.middleware("http")
-    async def _throttle(
+    async def _observe(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
+        path = request.url.path
+        metered = path not in _UNMETERED
+        start = time.perf_counter()
+
         limiter = getattr(request.app.state, "rate_limiter", None)
-        if limiter is not None and request.url.path not in _UNTHROTTLED:
-            key = request.client.host if request.client else "anonymous"
-            if not await limiter.allow(key):
-                body = {
-                    "resourceType": "OperationOutcome",
-                    "issue": [
-                        {
-                            "severity": "error",
-                            "code": "throttled",
-                            "diagnostics": "rate limit exceeded",
-                        }
-                    ],
-                }
-                return JSONResponse(body, status_code=429, media_type="application/fhir+json")
-        return await call_next(request)
+        if (
+            limiter is not None
+            and metered
+            and not await limiter.allow(request.client.host if request.client else "anonymous")
+        ):
+            body = {
+                "resourceType": "OperationOutcome",
+                "issue": [
+                    {"severity": "error", "code": "throttled", "diagnostics": "rate limit exceeded"}
+                ],
+            }
+            response: Response = JSONResponse(
+                body, status_code=429, media_type="application/fhir+json"
+            )
+        else:
+            response = await call_next(request)
+
+        rm = getattr(request.app.state, "request_metrics", None)
+        if rm is not None and metered:
+            # Label by the route TEMPLATE (bounded cardinality; never a PHI/id).
+            route = request.scope.get("route")
+            rm.record(
+                method=request.method,
+                route=getattr(route, "path", None) or "unmatched",
+                status=response.status_code,
+                duration_s=time.perf_counter() - start,
+            )
+        return response
 
     app.include_router(admin.router)
     app.include_router(fhir.router)
