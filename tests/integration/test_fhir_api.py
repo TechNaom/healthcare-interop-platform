@@ -352,3 +352,31 @@ def test_ingested_order_reads_as_service_request(clean_db: str, key_manager: Key
     assert resp.status_code == 200
     assert resp.json()["resourceType"] == "ServiceRequest"
     assert resp.json()["intent"] == "order"
+
+
+async def _hit_twice_with_limit(url: str, km: KeyManager) -> tuple[httpx.Response, httpx.Response]:
+    from hip.gateway.ratelimit import RateLimiter
+
+    engine = make_engine(url)
+    session_factory = make_sessionmaker(engine)
+    app = create_app()
+    app.state.engine = engine
+    app.state.session_factory = session_factory
+    app.state.authenticator = TokenAuthenticator(secret=_SECRET)
+    app.state.key_manager = km
+    app.state.rate_limiter = RateLimiter(rate=1, per_seconds=60)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        headers = _auth_header("fhir:read", "phi:full")
+        first = await client.get(f"/fhir/Patient/{UUID(int=1)}", headers=headers)
+        second = await client.get(f"/fhir/Patient/{UUID(int=2)}", headers=headers)
+    await engine.dispose()
+    return first, second
+
+
+def test_rate_limit_returns_429(clean_db: str, key_manager: KeyManager) -> None:
+    first, second = asyncio.run(_hit_twice_with_limit(clean_db, key_manager))
+    assert first.status_code == 404  # allowed (no such patient)
+    assert second.status_code == 429  # throttled by the middleware
+    assert second.json()["resourceType"] == "OperationOutcome"

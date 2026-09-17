@@ -11,19 +11,23 @@ In container:  uvicorn hip.gateway.app:app --host 0.0.0.0 --port 8000
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
 from hip import __version__
 from hip.gateway.api import admin, fhir
 from hip.gateway.auth import AuthError, authenticator_from_env
+from hip.gateway.ratelimit import rate_limiter_from_env
 from hip.observability.logging import configure_logging
 from hip.persistence.db import make_engine, make_sessionmaker
 from hip.security.blind_index import blind_indexer_from_env
 from hip.security.keymanager import keymanager_from_env
+
+# Liveness/readiness/schema endpoints are never throttled.
+_UNTHROTTLED = frozenset({"/healthz", "/readyz", "/openapi.json", "/docs", "/redoc"})
 
 
 @asynccontextmanager
@@ -40,6 +44,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.authenticator = authenticator_from_env()
     app.state.key_manager = keymanager_from_env()
     app.state.blind_indexer = blind_indexer_from_env()
+    app.state.rate_limiter = rate_limiter_from_env()
     try:
         yield
     finally:
@@ -66,6 +71,28 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     app.add_exception_handler(AuthError, _auth_error_handler)
+
+    @app.middleware("http")
+    async def _throttle(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        limiter = getattr(request.app.state, "rate_limiter", None)
+        if limiter is not None and request.url.path not in _UNTHROTTLED:
+            key = request.client.host if request.client else "anonymous"
+            if not await limiter.allow(key):
+                body = {
+                    "resourceType": "OperationOutcome",
+                    "issue": [
+                        {
+                            "severity": "error",
+                            "code": "throttled",
+                            "diagnostics": "rate limit exceeded",
+                        }
+                    ],
+                }
+                return JSONResponse(body, status_code=429, media_type="application/fhir+json")
+        return await call_next(request)
+
     app.include_router(admin.router)
     app.include_router(fhir.router)
     return app
