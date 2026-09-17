@@ -12,6 +12,7 @@ from hip.messaging.canonical.fhir import (
     from_fhir_encounter,
     from_fhir_observation,
     from_fhir_patient,
+    from_fhir_service_request,
     to_fhir_patient,
 )
 
@@ -100,3 +101,29 @@ def test_observation_reverse_maps_polymorphic_value() -> None:
 def test_observation_missing_required_fields_rejected() -> None:
     with pytest.raises(FhirParseError):
         from_fhir_observation({"resourceType": "Observation"})  # status + code are 1..1
+
+
+def test_service_request_reverse_maps() -> None:
+    order = from_fhir_service_request(
+        {
+            "resourceType": "ServiceRequest",
+            "status": "active",
+            "intent": "order",
+            "subject": {"display": "x"},
+            "code": {"coding": [{"code": "2339-0"}]},
+            "identifier": [
+                {"value": "P1", "type": {"coding": [{"code": "PLAC"}]}},
+                {"value": "F1", "type": {"coding": [{"code": "FILL"}]}},
+            ],
+        }
+    )
+    assert order.status is m.RequestStatus.active
+    assert order.intent is m.RequestIntent.order
+    assert order.ordered_item is not None and order.ordered_item.coding[0].code == "2339-0"
+    assert order.placer_order_number is not None and order.placer_order_number.value == "P1"
+    assert order.filler_order_number is not None and order.filler_order_number.value == "F1"
+
+
+def test_service_request_missing_required_rejected() -> None:
+    with pytest.raises(FhirParseError):
+        from_fhir_service_request({"resourceType": "ServiceRequest", "status": "active"})

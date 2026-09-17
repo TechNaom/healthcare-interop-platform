@@ -293,3 +293,62 @@ def test_create_observation_then_read(clean_db: str, key_manager: KeyManager) ->
     assert read.status_code == 200
     assert read.json()["resourceType"] == "Observation"
     assert read.json()["valueQuantity"]["value"] == 5.4
+
+
+_NEW_SERVICE_REQUEST: dict[str, Any] = {
+    "resourceType": "ServiceRequest",
+    "status": "active",
+    "intent": "order",
+    "subject": {"display": "unknown"},
+    "code": {"coding": [{"code": "2339-0", "system": "http://loinc.org", "display": "Glucose"}]},
+    "identifier": [{"value": "PLAC-9", "type": {"coding": [{"code": "PLAC"}]}}],
+}
+
+
+def test_create_service_request_then_read(clean_db: str, key_manager: KeyManager) -> None:
+    read = asyncio.run(
+        _create_read(clean_db, key_manager, "/fhir/ServiceRequest", _NEW_SERVICE_REQUEST)
+    )
+    assert read.status_code == 200
+    body = read.json()
+    assert body["resourceType"] == "ServiceRequest"
+    assert body["status"] == "active"
+    assert body["intent"] == "order"
+    assert body["code"]["coding"][0]["code"] == "2339-0"
+
+
+async def _ingest_orm_then_read_sr(url: str, km: KeyManager) -> httpx.Response:
+    engine = make_engine(url)
+    session_factory = make_sessionmaker(engine)
+    orm = (
+        "MSH|^~\\&|OE|OF|R|RF|20260825101500||ORM^O01|MID-ORM|P|2.5\r"
+        "PID|1||MRN1^^^HOSP^MR||DOE^JANE||19800101|F\r"
+        "ORC|NW|PLAC1|FILL1\r"
+        "OBR|1|PLAC1|FILL1|2339-0^Glucose^LN\r"
+    )
+    bundle = map_message(parse(orm))
+    assert bundle.orders
+    order_id = bundle.orders[0].canonical_id
+    async with session_factory() as session:
+        await PhiRepository(session, km).save_bundle(bundle)
+        await session.commit()
+
+    app = create_app()
+    app.state.engine = engine
+    app.state.session_factory = session_factory
+    app.state.authenticator = TokenAuthenticator(secret=_SECRET)
+    app.state.key_manager = km
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            f"/fhir/ServiceRequest/{order_id}", headers=_auth_header("fhir:read", "phi:full")
+        )
+    await engine.dispose()
+    return resp
+
+
+def test_ingested_order_reads_as_service_request(clean_db: str, key_manager: KeyManager) -> None:
+    resp = asyncio.run(_ingest_orm_then_read_sr(clean_db, key_manager))
+    assert resp.status_code == 200
+    assert resp.json()["resourceType"] == "ServiceRequest"
+    assert resp.json()["intent"] == "order"

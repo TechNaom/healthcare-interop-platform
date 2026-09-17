@@ -18,6 +18,7 @@ from typing import Any
 from fhir.resources.R4B.encounter import Encounter as FHIREncounter
 from fhir.resources.R4B.observation import Observation as FHIRObservation
 from fhir.resources.R4B.patient import Patient as FHIRPatient
+from fhir.resources.R4B.servicerequest import ServiceRequest as FHIRServiceRequest
 from pydantic import ValidationError
 
 from hip.messaging.canonical import model as m
@@ -250,6 +251,39 @@ def to_fhir_observation(observation: m.Observation) -> dict[str, Any]:
     return FHIRObservation.model_validate(data).model_dump(mode="json", exclude_none=True)
 
 
+def to_fhir_service_request(order: m.Order) -> dict[str, Any]:
+    """Render a canonical Order as a validated FHIR R4 ServiceRequest JSON dict."""
+    identifiers = [
+        _identifier(i)
+        for i in (order.placer_order_number, order.filler_order_number)
+        if i is not None
+    ]
+
+    data: dict[str, Any] = {
+        "resourceType": "ServiceRequest",
+        "id": str(order.canonical_id),
+        # status + intent are 1..1 in R4.
+        "status": order.status.value if order.status else "unknown",
+        "intent": order.intent.value,
+        # subject is 1..1; use the patient reference or a display-only placeholder.
+        "subject": _reference(order.patient_ref)
+        if order.patient_ref is not None
+        else {"display": "unknown"},
+    }
+    if identifiers:
+        data["identifier"] = identifiers
+    if order.ordered_item is not None:
+        data["code"] = _codeable_concept(order.ordered_item)
+    if order.encounter_ref is not None:
+        data["encounter"] = _reference(order.encounter_ref)
+    if order.ordering_provider is not None:
+        data["requester"] = _reference(order.ordering_provider)
+    if order.order_datetime is not None:
+        data["authoredOn"] = _fhir_datetime(order.order_datetime)
+
+    return FHIRServiceRequest.model_validate(data).model_dump(mode="json", exclude_none=True)
+
+
 # --------------------------------------------------------------------------- #
 # FHIR -> canonical (the write edge). Validate the incoming FHIR, then map from
 # the plain JSON so we don't wrestle with library value-types.
@@ -430,4 +464,35 @@ def from_fhir_observation(data: dict[str, Any]) -> m.Observation:
             if coding.get("code")
         ],
         reference_range=ranges[0].get("text") if ranges else None,
+    )
+
+
+def _identifier_by_type(identifiers: list[dict[str, Any]], type_code: str) -> m.Identifier | None:
+    """Pick an identifier whose type coding matches, else None."""
+    for data in identifiers:
+        coding = (data.get("type") or {}).get("coding") or []
+        if any(c.get("code") == type_code for c in coding):
+            return _identifier_in(data)
+    return None
+
+
+def from_fhir_service_request(data: dict[str, Any]) -> m.Order:
+    """Map an incoming FHIR R4 ServiceRequest to a new canonical Order (fresh id)."""
+    try:
+        FHIRServiceRequest.model_validate(data)
+    except ValidationError as exc:
+        raise FhirParseError(str(exc)) from exc
+
+    identifiers = data.get("identifier", [])
+    intent = _enum_or_none(m.RequestIntent, data.get("intent")) or m.RequestIntent.order
+    code = data.get("code")
+    authored = data.get("authoredOn")
+    return m.Order(
+        placer_order_number=_identifier_by_type(identifiers, "PLAC")
+        or (_identifier_in(identifiers[0]) if identifiers else None),
+        filler_order_number=_identifier_by_type(identifiers, "FILL"),
+        status=_enum_or_none(m.RequestStatus, data.get("status")),
+        intent=intent,
+        ordered_item=_codeable_concept_in(code) if code else None,
+        order_datetime=_datetime_in(authored),
     )

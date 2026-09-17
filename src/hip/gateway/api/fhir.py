@@ -64,19 +64,23 @@ def _respond(resource_type: str, resource: dict[str, Any], principal: Principal)
     return JSONResponse(filtered, media_type=_FHIR_JSON)
 
 
-async def _fetch(
+async def _fetch(  # noqa: PLR0913 - cohesive read helper shared by all read routes
     resource_type: str,
     canonical_id: UUID,
     session: AsyncSession,
     principal: Principal,
     key_manager: KeyManager,
+    *,
+    display_type: str | None = None,
 ) -> StoredResource | JSONResponse:
-    """Read a stored resource of the expected type (emitting a read audit), or a
-    404 OperationOutcome."""
+    """Read a stored resource of the expected canonical type (emitting a read
+    audit), or a 404 OperationOutcome. ``display_type`` overrides the type name in
+    the 404 message when the FHIR name differs from the stored one (Order↔ServiceRequest)."""
     stored = await PhiRepository(session, key_manager).get(canonical_id, actor=principal.subject)
     await session.commit()
     if stored is None or stored.resource_type != resource_type:
-        return _operation_outcome("not-found", f"{resource_type}/{canonical_id} not found", 404)
+        shown = display_type or resource_type
+        return _operation_outcome("not-found", f"{shown}/{canonical_id} not found", 404)
     return stored
 
 
@@ -159,7 +163,7 @@ async def read_observation(
     )
 
 
-async def _persist_created(  # noqa: PLR0913, PLR0917 - cohesive create helper for 3 routes
+async def _persist_created(  # noqa: PLR0913, PLR0917 - cohesive create helper for 4 routes
     resource: m.CanonicalResource,
     resource_type: str,
     fhir_body: dict[str, Any],
@@ -231,4 +235,41 @@ async def create_observation(
     created = serialize.to_fhir_observation(observation)
     return await _persist_created(
         observation, "Observation", created, session, principal, key_manager, blind_indexer
+    )
+
+
+@router.get("/ServiceRequest/{canonical_id}")
+async def read_service_request(
+    canonical_id: UUID, session: SessionDep, principal: PrincipalDep, key_manager: KeyDep
+) -> JSONResponse:
+    """Return a stored order as a FHIR R4 ServiceRequest (or a 404 OperationOutcome)."""
+    # Canonical resource type is "Order"; the FHIR name is ServiceRequest.
+    result = await _fetch(
+        "Order", canonical_id, session, principal, key_manager, display_type="ServiceRequest"
+    )
+    if isinstance(result, JSONResponse):
+        return result
+    return _respond(
+        "ServiceRequest",
+        serialize.to_fhir_service_request(m.Order.model_validate(result.payload)),
+        principal,
+    )
+
+
+@router.post("/ServiceRequest", status_code=201)
+async def create_service_request(
+    session: SessionDep,
+    principal: WritePrincipalDep,
+    key_manager: KeyDep,
+    blind_indexer: OptBlindDep,
+    body: Annotated[dict[str, Any], Body(media_type=_FHIR_JSON)],
+) -> JSONResponse:
+    """Create an Order from a FHIR R4 ServiceRequest. 201 + Location, or 400 on invalid."""
+    try:
+        order = serialize.from_fhir_service_request(body)
+    except FhirParseError as exc:
+        return _operation_outcome("invalid", f"invalid FHIR ServiceRequest: {exc}", 400)
+    created = serialize.to_fhir_service_request(order)
+    return await _persist_created(
+        order, "ServiceRequest", created, session, principal, key_manager, blind_indexer
     )
