@@ -28,6 +28,7 @@ from hip.messaging.hl7 import ack, router
 from hip.messaging.hl7.mllp import MLLPBuffer, wrap
 from hip.messaging.hl7.parser import ParsedMessage, ParseError, parse
 from hip.observability.logging import configure_logging, get_logger
+from hip.observability.tracing import configure_tracing, get_tracer
 from hip.persistence.db import make_engine, make_sessionmaker
 from hip.persistence.dead_letter_repo import DeadLetterRepository
 from hip.persistence.deid_repo import DeidRepository
@@ -37,6 +38,7 @@ from hip.security.deid import deidentify_patient
 from hip.security.keymanager import KeyManager, keymanager_from_env
 
 logger = get_logger("hip.messaging.hl7.listener")
+tracer = get_tracer("hip.messaging.hl7")
 
 SessionFactory = async_sessionmaker[AsyncSession]
 
@@ -143,8 +145,17 @@ async def ingest(
     reason, message-control-id, sending system) — never patient content
     (docs/TEST_STRATEGY.md no-PHI-in-logs).
     """
-    result = await _run_ingest(raw, session_factory, key_manager, blind_indexer)
-    parsed = result.parsed
+    with tracer.start_as_current_span("hl7.ingest") as span:
+        result = await _run_ingest(raw, session_factory, key_manager, blind_indexer)
+        parsed = result.parsed
+        # Control-plane attributes only — never patient content (no-PHI rule).
+        span.set_attribute("hl7.ack", result.ack_code.value)
+        if parsed is not None:
+            span.set_attribute("hl7.message_code", parsed.message_code)
+            if parsed.control_id:
+                span.set_attribute("hl7.control_id", parsed.control_id)
+        if result.failure_stage is not None:
+            span.set_attribute("hl7.failure_stage", result.failure_stage.value)
     logger.info(
         "message_ingested",
         ack=result.ack_code.value,
@@ -190,12 +201,16 @@ async def _run_ingest(
 
     if result.ack_code is ack.AckCode.AA and result.bundle is not None:
         try:
-            async with session_factory() as session:
-                await PhiRepository(session, key_manager, blind_indexer).save_bundle(result.bundle)
-                # De-identified copy into the separate store, same transaction.
-                if result.bundle.patient is not None:
-                    await DeidRepository(session).save(deidentify_patient(result.bundle.patient))
-                await session.commit()
+            with tracer.start_as_current_span("hl7.persist"):
+                async with session_factory() as session:
+                    repo = PhiRepository(session, key_manager, blind_indexer)
+                    await repo.save_bundle(result.bundle)
+                    # De-identified copy into the separate store, same transaction.
+                    if result.bundle.patient is not None:
+                        await DeidRepository(session).save(
+                            deidentify_patient(result.bundle.patient)
+                        )
+                    await session.commit()
         except SQLAlchemyError as exc:
             logger.error("persist_failed", error=type(exc).__name__)  # never log PHI
             parsed = result.parsed
@@ -277,6 +292,7 @@ class MLLPListener:
 
 async def _main() -> None:  # pragma: no cover - operational entrypoint
     configure_logging()
+    configure_tracing(service_name="hip.mllp")
     engine = make_engine()
     session_factory = make_sessionmaker(engine)
     await MLLPListener(
