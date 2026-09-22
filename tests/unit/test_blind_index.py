@@ -39,3 +39,18 @@ def test_from_env() -> None:
         assert blind_indexer_from_env() is not None
     with mock.patch.dict(os.environ, {}, clear=True):
         assert blind_indexer_from_env() is None
+
+
+def test_from_env_prefers_vault_over_static_env_key() -> None:
+    env = {
+        "HIP_VAULT_ADDR": "http://vault:8200",
+        "HIP_VAULT_TOKEN": "tok",
+        "HIP_BLIND_INDEX_KEY": "env-key",
+    }
+    with (
+        mock.patch.dict(os.environ, env, clear=True),
+        mock.patch("hip.security.blind_index.vault.read_secret", return_value="vault-key"),
+    ):
+        idx = blind_indexer_from_env()
+    assert idx is not None
+    assert idx.index("MRN1") == HmacBlindIndexer(b"vault-key").index("MRN1")

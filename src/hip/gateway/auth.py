@@ -9,10 +9,11 @@ Fail-closed: if no verification key/secret is configured, every request is
 rejected (401). PHI is never reachable without a validated token.
 
 Verification is done with a configured key so the platform never has to trust a
-token it can't check:
-* ``HIP_JWT_PUBLIC_KEY`` (RS256) — the realm's public key, as Keycloak exposes;
+token it can't check, in priority order:
+* ``HIP_JWT_JWKS_URL`` (RS256) — live JWKS fetch from Keycloak's realm
+  certs endpoint, keyed by the token's ``kid`` — the production path;
+* ``HIP_JWT_PUBLIC_KEY`` (RS256) — a single static realm public key;
 * or ``HIP_JWT_SECRET`` (HS256) — for simpler/self-contained setups and tests.
-Live JWKS fetch from Keycloak is a thin follow-on (swap the key source).
 """
 
 from __future__ import annotations
@@ -51,11 +52,13 @@ class TokenAuthenticator:
     def __init__(
         self,
         *,
+        jwks_url: str | None = None,
         public_key: str | None = None,
         secret: str | None = None,
         issuer: str | None = None,
         audience: str | None = None,
     ) -> None:
+        self._jwks_client = jwt.PyJWKClient(jwks_url) if jwks_url else None
         self._public_key = public_key
         self._secret = secret
         self._issuer = issuer
@@ -63,15 +66,24 @@ class TokenAuthenticator:
 
     @property
     def configured(self) -> bool:
-        return bool(self._public_key or self._secret)
+        return bool(self._jwks_client or self._public_key or self._secret)
 
     def authenticate(self, token: str) -> Principal:
         if not self.configured:
             # Secure default: never accept a token we cannot verify.
             raise AuthError(401, "login", "authentication is not configured")
 
-        if self._public_key:
-            key: str = self._public_key
+        key: str
+        if self._jwks_client is not None:
+            try:
+                key = self._jwks_client.get_signing_key_from_jwt(token).key
+            except jwt.PyJWKClientError as exc:
+                raise AuthError(
+                    401, "login", f"could not resolve signing key: {type(exc).__name__}"
+                ) from exc
+            algorithms = ["RS256"]
+        elif self._public_key:
+            key = self._public_key
             algorithms = ["RS256"]
         elif self._secret is not None:
             key = self._secret
@@ -104,6 +116,7 @@ class TokenAuthenticator:
 def authenticator_from_env() -> TokenAuthenticator:
     """Build an authenticator from environment configuration."""
     return TokenAuthenticator(
+        jwks_url=os.environ.get("HIP_JWT_JWKS_URL"),
         public_key=os.environ.get("HIP_JWT_PUBLIC_KEY"),
         secret=os.environ.get("HIP_JWT_SECRET"),
         issuer=os.environ.get("HIP_JWT_ISSUER"),

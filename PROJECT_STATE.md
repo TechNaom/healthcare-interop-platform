@@ -1,7 +1,7 @@
 # Project State
 
 _Living status doc. Update at the end of every meaningful work session._
-_Last updated: 2026-08-24._
+_Last updated: 2026-09-22._
 
 ## What this is
 
@@ -13,41 +13,54 @@ unit. Full context: [README.md](README.md) → [Healthcare Interop Platform.md](
 
 ## Current status
 
-**Phase 0 merged (PR #1). Phase 1 in review (PR #2, CI green): canonical model + running gateway.**
+**~90% of the AI-compressed pilot scope. Direct-to-`main` workflow (no PRs/branches, per 2026-08-25 decision) — every phase below is merged and CI-green.**
 
-- Planning: **complete** (`docs/`, 9 ADRs).
-- Kickoff questions: **resolved** 2026-08-24 — 12-week AI-orchestrated track;
-  synthetic-data-only; private GitHub remote is source of truth ([ADR-004](docs/DECISIONS.md#adr-004)).
-- **Phase 0 (foundations)** — merged to `main`: package skeleton, container/CI/
-  pre-commit, four-tier testing framework.
-- **Phase 1 (PR #2)** — the canonical data model as Pydantic types
-  (`hip.messaging.canonical.model`, faithful to DATA_MODEL.md v0.2.0 — the
-  ADR-001 review deliverable) and a **FastAPI gateway that runs** (`/healthz`,
-  `/readyz`, OpenAPI), verified natively and in-container.
-- **Still stubbed by design:** the canonical `mapper` (awaits model sign-off per
-  ADR-001), HL7 ingestion, FHIR CRUD, persistence, auth.
+Working end to end, verified against real Postgres and (for the core stack)
+real Docker: **HL7 v2 over MLLP → parse/route/map to the canonical model →
+encrypted persistence + append-only audit → de-identified copy →
+JWT-authenticated + RBAC-gated + minimum-necessary-filtered FHIR R4 API**
+(Patient/Encounter/Observation/ServiceRequest, read + write + blind-index
+search on Patient), plus rate limiting, OTel metrics, a Helm chart, and DB-grant
+compliance tests (audit immutability, store separation). All HIPAA technical
+safeguards from `docs/SECURITY_COMPLIANCE.md` are implemented at least once.
+
+**Just landed (this session):** real Keycloak JWKS support in `gateway.auth`
+(`HIP_JWT_JWKS_URL`, live per-token key lookup by `kid`) and Vault-backed
+`KeyManager`/`BlindIndexer` (`security.vault`, KV-v2 read, takes priority over
+the static `HIP_ENCRYPTION_KEY`/`HIP_BLIND_INDEX_KEY` env vars when
+`HIP_VAULT_ADDR` is set). `docker-compose.infra.yml` wires the `keycloak` +
+`vault` services (behind the `infra` profile) into `app`/`mllp`; `minio` stays
+declared-but-unwired since no phase needs blob storage yet.
+
+**Still open** (roughly in priority order): Synthea bulk fixtures for
+realistic-volume demo/perf data; FHIR search for Encounter/Observation
+(currently Patient-only); DiagnosticReport resource (HL7 OBR-25, a documented
+deferral since the ADR-001 review); cloud-native variant (self-hosted core is
+deliberately built first, per the 2026-08-25 deployment decision).
+
+For the detailed build log (every phase, commit, and gotcha), see the
+`project-healthcare-interop-platform` memory record — this file stays a
+high-level snapshot.
 
 ### ADR-001 gate: cleared 2026-08-25
 The canonical model was reviewed against `docs/DATA_MODEL.md` v0.2.0 and HL7/FHIR
 correctness (findings: 1 comment typo fixed; DiagnosticReport/OBR-25 remains a
-documented deferral). Model accepted → the **HL7→canonical mapper is built**
-(`hip.messaging.canonical.mapper`) and wired into ingestion. Canonical→FHIR is
-the next mapping direction.
+documented deferral).
 
 ## Timeline — 12-week AI-orchestrated track
 
 | Week | Focus | State |
 |---|---|---|
-| 1 | Foundations only | ✅ merged (PR #1) |
-| 2 | Canonical model: drafted, revised, signed off | ✅ model built (PR #2); **sign-off pending** |
-| 3 | Skeletons (gRPC stub deferred — ADR-006) | ✅ gateway skeleton + health done (PR #2) |
-| 4–5 | HL7 ingestion built, then hardened | ✅ MLLP listener + parse + route + ACK/NACK; edge-case hardening ongoing |
-| 6 | HL7→FHIR mapping, FHIR CRUD core | 🔨 HL7→canonical + canonical→FHIR done; GET /fhir/Patient live; more resources + write/search next |
-| 7 | FHIR completeness | ⬜ |
+| 1 | Foundations only | ✅ merged |
+| 2 | Canonical model: drafted, revised, signed off | ✅ model built + ADR-001 gate cleared |
+| 3 | Skeletons (gRPC stub deferred — ADR-006) | ✅ gateway skeleton + health done |
+| 4–5 | HL7 ingestion built, then hardened | ✅ MLLP listener + parse + route + ACK/NACK |
+| 6 | HL7→FHIR mapping, FHIR CRUD core | ✅ HL7→canonical + canonical→FHIR; Patient/Encounter/Observation/ServiceRequest read+write |
+| 7 | FHIR completeness | 🔨 Patient search (blind index) done; Encounter/Observation search + DiagnosticReport still open |
 | 8 | Python validator hardening (C++ deferred — ADR-006) | ⬜ |
-| 9 | Persistence, RBAC, audit log, KeyManager | 🔨 Postgres store + audit + Alembic done; JWT auth + RBAC enforced at gateway; KeyManager/encryption + field-level ABAC next |
-| 10 | Safe Harbor de-id, OpenTelemetry | ⬜ |
-| 11 | Integration testing + bug-fix buffer | ⬜ |
+| 9 | Persistence, RBAC, audit log, KeyManager | ✅ Postgres+Alembic, encryption at rest, JWT auth + RBAC + minimum-necessary, real Keycloak JWKS + Vault-backed keys |
+| 10 | Safe Harbor de-id, OpenTelemetry | ✅ de-id store + OTel metrics/Prometheus done; full distributed tracing not yet |
+| 11 | Integration testing + bug-fix buffer | 🔨 DB-grant compliance tests, rate limiting, Helm chart, compose demo done; Synthea bulk fixtures still open |
 | 12 | Stabilization, demo, retrospective | ⬜ |
 
 ## Architecture decisions (authoritative log: [docs/DECISIONS.md](docs/DECISIONS.md))
@@ -139,9 +152,10 @@ TEST_STRATEGY.md section 8.
 
 ## Next recommended task
 
-**Week 2:** write the canonical data model spec deliverable
-(Patient / Encounter / Observation / Order) building on
-[docs/DATA_MODEL.md](docs/DATA_MODEL.md), and get it reviewed **before** any
-`messaging.canonical.mapper` or parser code is written against it (ADR-001).
-Then wire the FastAPI app factory + `/healthz` / `/readyz` (first real code in
-`hip.gateway`).
+Pick one of: **Synthea bulk fixtures** (realistic-volume synthetic data for
+demo/perf, replacing the hand-written ADT/ORU/ORM fixtures used so far),
+**FHIR search for Encounter/Observation** (extend the blind-index pattern
+already built for Patient), or **DiagnosticReport** (the HL7 OBR-25 mapping
+deferred at the ADR-001 review). The self-hosted core is intentionally built
+before the cloud-native variant (2026-08-25 deployment decision) — don't start
+that until the items above are done.

@@ -4,9 +4,13 @@
 # never live in this file or the repo.
 #
 # The `app` service runs Alembic migrations then serves the FHIR gateway; `mllp`
-# runs the HL7 v2 ingestion listener. keycloak/vault/minio are declared for the
-# full self-hosted architecture (identity/secrets/object-store) and are not yet
-# wired into the app — auth/encryption use env-provided secrets for now.
+# runs the HL7 v2 ingestion listener. keycloak/vault are wired (JWKS auth,
+# Vault-sourced encryption/blind-index keys) but off by default — bring them up
+# with `docker compose --profile infra -f docker-compose.yml -f
+# docker-compose.infra.yml up` (see that file for prerequisites). Without the
+# override, auth/encryption keep using env-provided secrets. minio is declared
+# for the full self-hosted architecture (object store) but has no consumer yet
+# — no phase needs blob storage.
 
 services:
   db:
@@ -25,10 +29,11 @@ services:
       timeout: 5s
       retries: 5
 
-  # keycloak/vault/minio are the full self-hosted architecture but aren't wired
-  # into the app yet (auth/encryption use env secrets for now). They're behind the
-  # "infra" profile so the default `docker compose up` brings up only the working
-  # core (db + app + mllp). Add them with: docker compose --profile infra up
+  # keycloak/vault/minio are the full self-hosted architecture. keycloak/vault
+  # are wired via docker-compose.infra.yml (see top-of-file comment); minio has
+  # no consumer yet. They're behind the "infra" profile so the default
+  # `docker compose up` brings up only the working core (db + app + mllp).
+  # Add them with: docker compose --profile infra up
   keycloak:
     image: quay.io/keycloak/keycloak:26.0
     profiles: ["infra"]
@@ -73,9 +78,12 @@ services:
     environment:
       HIP_ENV: local
       HIP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-hip}:${POSTGRES_PASSWORD:?}@db:5432/${POSTGRES_DB:-hip}
-      HIP_ENCRYPTION_KEY: ${HIP_ENCRYPTION_KEY:?set HIP_ENCRYPTION_KEY in .env}
-      HIP_BLIND_INDEX_KEY: ${HIP_BLIND_INDEX_KEY:?set HIP_BLIND_INDEX_KEY in .env}
-      HIP_JWT_SECRET: ${HIP_JWT_SECRET:?set HIP_JWT_SECRET in .env}
+      HIP_ENCRYPTION_KEY: ${HIP_ENCRYPTION_KEY:-}
+      HIP_BLIND_INDEX_KEY: ${HIP_BLIND_INDEX_KEY:-}
+      HIP_JWT_SECRET: ${HIP_JWT_SECRET:-}
+      HIP_VAULT_ADDR: ${HIP_VAULT_ADDR:-}
+      HIP_VAULT_TOKEN: ${HIP_VAULT_TOKEN:-}
+      HIP_JWT_JWKS_URL: ${HIP_JWT_JWKS_URL:-}
     command: ["sh", "-c", "alembic upgrade head && uvicorn hip.gateway.app:app --host 0.0.0.0 --port 8000"]
     ports:
       - "8000:8000"
@@ -95,8 +103,10 @@ services:
         condition: service_healthy # app runs the migrations the listener needs
     environment:
       HIP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-hip}:${POSTGRES_PASSWORD:?}@db:5432/${POSTGRES_DB:-hip}
-      HIP_ENCRYPTION_KEY: ${HIP_ENCRYPTION_KEY:?}
-      HIP_BLIND_INDEX_KEY: ${HIP_BLIND_INDEX_KEY:?}
+      HIP_ENCRYPTION_KEY: ${HIP_ENCRYPTION_KEY:-}
+      HIP_BLIND_INDEX_KEY: ${HIP_BLIND_INDEX_KEY:-}
+      HIP_VAULT_ADDR: ${HIP_VAULT_ADDR:-}
+      HIP_VAULT_TOKEN: ${HIP_VAULT_TOKEN:-}
     command: ["python", "-m", "hip.messaging.hl7.listener"]
     ports:
       - "2575:2575"

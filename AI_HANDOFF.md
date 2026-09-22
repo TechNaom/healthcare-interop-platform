@@ -1,7 +1,7 @@
 # AI Handoff
 
 _Written so a different AI assistant (or human) can pick this repo up cold._
-_Last updated: 2026-08-24._
+_Last updated: 2026-09-22._
 
 ## What this repo is
 
@@ -54,10 +54,15 @@ Docker/Buildx/Compose · GitHub Actions · `uv` · ruff · mypy · bandit · git
 
 ## Current state
 
-Phase 0 scaffold on branch `phase-0-scaffold`. Package skeleton + interface
-stubs + container/CI/pre-commit config. **No business logic yet** — every
-module is a documented stub. See [PROJECT_STATE.md](PROJECT_STATE.md) for the
-precise line and the repo layout diagram.
+~90% of the AI-compressed pilot scope, all on `main` (direct-to-main workflow,
+no PRs/branches, since 2026-08-25). The full pipeline runs end to end against
+real Postgres/Docker: HL7 v2 over MLLP → parse/route/map → encrypted
+persistence + audit → de-id copy → JWT+RBAC+minimum-necessary-gated FHIR R4
+API (Patient/Encounter/Observation/ServiceRequest read+write, Patient search),
+plus rate limiting, OTel metrics, a Helm chart, and DB-grant compliance tests.
+See [PROJECT_STATE.md](PROJECT_STATE.md) for the current status and what's
+still open (Synthea bulk fixtures, Encounter/Observation search,
+DiagnosticReport, cloud-native variant).
 
 ## What NOT to change without a new ADR
 
@@ -70,7 +75,7 @@ precise line and the repo layout diagram.
 
 ## Current & next task
 
-See [PROJECT_STATE.md](PROJECT_STATE.md) "Next recommended task". Short version:
-finish/verify the Phase 0 scaffold, then write and get sign-off on the
-**canonical data model spec** (Patient/Encounter/Observation/Order) *before*
-any parser/mapper code is written against it.
+See [PROJECT_STATE.md](PROJECT_STATE.md) "Next recommended task": Synthea bulk
+fixtures, FHIR search for Encounter/Observation, or DiagnosticReport — in that
+rough priority order. The cloud-native variant comes only after those, per the
+2026-08-25 deployment decision (self-hosted core first).

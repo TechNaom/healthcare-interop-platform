@@ -26,6 +26,8 @@ search   : 200 total = 1
 
 Requires Docker + `uv`. The generated `.env` holds **local-only** keys (gitignored); production secrets come from Vault. HL7 ingestion also listens on MLLP port 2575 (`mllp` service).
 
+To run against real Keycloak (JWKS) + Vault instead of static env secrets, see [docker-compose.infra.yml](docker-compose.infra.yml).
+
 ## Deploy to Kubernetes
 
 A Helm chart is in [deploy/helm/hip](deploy/helm/hip) (gateway + MLLP listener + migration hook Job). Point it at the client's own Postgres and secret store — no cloud-vendor dependency (ADR-003):

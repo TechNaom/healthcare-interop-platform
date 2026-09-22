@@ -41,3 +41,4 @@ hip.security.deid
 hip.security.keymanager
 hip.security.objectstore
 hip.security.secrets
+hip.security.vault

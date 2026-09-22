@@ -18,6 +18,8 @@ import hmac
 import os
 from typing import Protocol, runtime_checkable
 
+from hip.security import vault
+
 
 @runtime_checkable
 class BlindIndexer(Protocol):
@@ -37,6 +39,8 @@ class HmacBlindIndexer:
 
 
 def blind_indexer_from_env() -> BlindIndexer | None:
-    """Build a blind indexer from ``HIP_BLIND_INDEX_KEY``, or None (search off)."""
-    key = os.environ.get("HIP_BLIND_INDEX_KEY")
+    """Build a blind indexer, preferring Vault (production, ADR-003) over the
+    ``HIP_BLIND_INDEX_KEY`` env var (local dev/tests), or None (search off)."""
+    path = os.environ.get("HIP_VAULT_BLIND_INDEX_KEY_PATH", "secret/data/hip/blind-index-key")
+    key = vault.read_secret(path, "key") or os.environ.get("HIP_BLIND_INDEX_KEY")
     return HmacBlindIndexer(key.encode()) if key else None

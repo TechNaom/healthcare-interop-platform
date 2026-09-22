@@ -9,7 +9,7 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from hip.gateway.auth import AuthError, TokenAuthenticator
+from hip.gateway.auth import AuthError, TokenAuthenticator, authenticator_from_env
 
 pytestmark = pytest.mark.unit
 
@@ -94,3 +94,50 @@ def test_unconfigured_authenticator_fails_closed() -> None:
     with pytest.raises(AuthError) as exc:
         auth.authenticate(_hs256())
     assert exc.value.status_code == 401
+
+
+def test_jwks_token_validated_via_signing_key_lookup(
+    rsa_keys: tuple[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The live-Keycloak path: signing key is resolved per-token from JWKS."""
+    private_pem, public_pem = rsa_keys
+    token = jwt.encode(
+        {"sub": "carol", "realm_access": {"roles": ["fhir:read"]}},
+        private_pem,
+        algorithm="RS256",
+    )
+    auth = TokenAuthenticator(
+        jwks_url="https://keycloak.example/realms/hip/protocol/openid-connect/certs"
+    )
+    assert auth.configured
+    monkeypatch.setattr(
+        auth._jwks_client,  # noqa: SLF001 - exercising the JWKS lookup path directly
+        "get_signing_key_from_jwt",
+        lambda _token: type("SigningKey", (), {"key": public_pem})(),
+    )
+    principal = auth.authenticate(token)
+    assert principal.subject == "carol"
+    assert principal.has_role("fhir:read")
+
+
+def test_jwks_lookup_failure_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    auth = TokenAuthenticator(
+        jwks_url="https://keycloak.example/realms/hip/protocol/openid-connect/certs"
+    )
+
+    def _raise(_token: str) -> None:
+        raise jwt.PyJWKClientError("no matching key")
+
+    monkeypatch.setattr(auth._jwks_client, "get_signing_key_from_jwt", _raise)  # noqa: SLF001
+    with pytest.raises(AuthError) as exc:
+        auth.authenticate(_hs256())
+    assert exc.value.status_code == 401
+
+
+def test_from_env_prefers_jwks_over_public_key_and_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "HIP_JWT_JWKS_URL", "https://keycloak.example/realms/hip/protocol/openid-connect/certs"
+    )
+    monkeypatch.setenv("HIP_JWT_SECRET", _SECRET)
+    auth = authenticator_from_env()
+    assert auth._jwks_client is not None  # noqa: SLF001

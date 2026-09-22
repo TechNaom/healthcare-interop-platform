@@ -8,7 +8,8 @@ is what Postgres ever sees.
 
 Fail-closed: if no key is configured, ``keymanager_from_env`` returns ``None``
 and any PHI write/read that needs one refuses — PHI is never stored in the clear
-by omission.
+by omission. If Vault *is* configured but unreachable, that's a startup error
+(``vault.VaultError``), not a silent fall-through to "unconfigured".
 """
 
 from __future__ import annotations
@@ -17,6 +18,8 @@ import os
 from typing import Protocol, runtime_checkable
 
 from cryptography.fernet import Fernet
+
+from hip.security import vault
 
 
 @runtime_checkable
@@ -48,10 +51,13 @@ class FernetKeyManager:
 
 
 def keymanager_from_env() -> KeyManager | None:
-    """Build a KeyManager from ``HIP_ENCRYPTION_KEY`` (Fernet key), or None.
+    """Build a KeyManager, preferring Vault (production, ADR-003) over the
+    ``HIP_ENCRYPTION_KEY`` env var (local dev/tests). Returns None if neither
+    is configured.
 
     None means "not configured" — callers must fail closed rather than fall back
     to storing PHI unencrypted.
     """
-    key = os.environ.get("HIP_ENCRYPTION_KEY")
+    path = os.environ.get("HIP_VAULT_ENCRYPTION_KEY_PATH", "secret/data/hip/encryption-key")
+    key = vault.read_secret(path, "key") or os.environ.get("HIP_ENCRYPTION_KEY")
     return FernetKeyManager(key) if key else None

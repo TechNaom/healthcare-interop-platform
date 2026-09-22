@@ -1,0 +1,35 @@
+# Optional override that points the app/mllp services at the real Keycloak +
+# Vault instances (the "infra" profile) instead of static env secrets. Use
+# alongside the base compose file and the infra profile:
+#
+#   docker compose --profile infra -f docker-compose.yml -f docker-compose.infra.yml up
+#
+# Prerequisites (one-time, after keycloak/vault are up):
+#   - Create a realm/client in Keycloak matching HIP_JWT_JWKS_URL below.
+#   - Seed Vault KV-v2 secrets (dev mode, root token from VAULT_DEV_ROOT_TOKEN):
+#       vault kv put secret/hip/encryption-key key=<fernet-key>
+#       vault kv put secret/hip/blind-index-key key=<hmac-key>
+#
+# Without this override, `docker compose up` (no profile) keeps using
+# HIP_ENCRYPTION_KEY / HIP_BLIND_INDEX_KEY / HIP_JWT_SECRET from .env — the
+# working default for local dev and CI.
+
+services:
+  app:
+    environment:
+      HIP_VAULT_ADDR: http://vault:8200
+      HIP_VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN:?set VAULT_DEV_ROOT_TOKEN in .env}
+      HIP_JWT_JWKS_URL: http://keycloak:8080/realms/hip/protocol/openid-connect/certs
+    depends_on:
+      vault:
+        condition: service_started
+      keycloak:
+        condition: service_started
+
+  mllp:
+    environment:
+      HIP_VAULT_ADDR: http://vault:8200
+      HIP_VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN:?set VAULT_DEV_ROOT_TOKEN in .env}
+    depends_on:
+      vault:
+        condition: service_started
