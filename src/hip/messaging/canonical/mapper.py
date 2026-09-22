@@ -5,10 +5,11 @@ never HL7->FHIR directly. This side maps parsed HL7 v2 segments to the canonical
 types in ``model``; the FHIR side (canonical->FHIR) is a later phase.
 
 Scope now: the fields DATA_MODEL.md v0.2.0 marks as initial scope for ADT
-(Patient + Encounter), ORU (Observation), and ORM (Order). Vocabulary tables
-(HL7 -> FHIR) are small inline maps here and become versioned configuration
-later (docs/DATA_MODEL.md "Identifiers & versioning"). Deferred per DATA_MODEL:
-race/ethnicity extensions, DiagnosticReport/OBR-25, local Z-segments.
+(Patient + Encounter), ORU (Observation + DiagnosticReport from OBR/OBR-25), and
+ORM (Order). Vocabulary tables (HL7 -> FHIR) are small inline maps here and
+become versioned configuration later (docs/DATA_MODEL.md "Identifiers &
+versioning"). Deferred per DATA_MODEL: race/ethnicity extensions, local
+Z-segments.
 
 A field this build cannot map safely (e.g. an unmapped OBX-2 data type) raises
 ``MappingError`` — the caller turns that into a transform-stage dead-letter,
@@ -41,6 +42,7 @@ class CanonicalBundle:
     encounter: m.Encounter | None = None
     orders: list[m.Order] = field(default_factory=list)
     observations: list[m.Observation] = field(default_factory=list)
+    diagnostic_reports: list[m.DiagnosticReport] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #
@@ -77,6 +79,13 @@ def _segments(raw: str) -> dict[str, list[_Seg]]:
         fields = line.split("|")
         out.setdefault(fields[0], []).append(_Seg(fields))
     return out
+
+
+def _ordered_segments(raw: str) -> list[_Seg]:
+    """Segments in wire order (needed for OBR→OBX grouping, which the by-name
+    ``_segments`` map flattens away)."""
+    text = raw.replace("\r\n", "\r").replace("\n", "\r").strip()
+    return [_Seg(line.split("|")) for line in text.split("\r") if line]
 
 
 def _first(segs: dict[str, list[_Seg]], name: str) -> _Seg | None:
@@ -157,6 +166,18 @@ _ORC5_STATUS = {  # HL7 table 0038 (ORC-5) -> RequestStatus (authoritative)
     "CA": m.RequestStatus.revoked,
     "DC": m.RequestStatus.revoked,
     "HD": m.RequestStatus.on_hold,
+}
+
+# OBR-25 result status (HL7 table 0123) -> FHIR DiagnosticReport status.
+_OBR25_STATUS = {
+    "F": m.DiagnosticReportStatus.final,
+    "P": m.DiagnosticReportStatus.preliminary,
+    "C": m.DiagnosticReportStatus.corrected,
+    "A": m.DiagnosticReportStatus.partial,  # some, but not all, results available
+    "R": m.DiagnosticReportStatus.partial,  # results stored, not yet verified
+    "I": m.DiagnosticReportStatus.registered,  # specimen received, procedure incomplete
+    "O": m.DiagnosticReportStatus.registered,  # order received
+    "X": m.DiagnosticReportStatus.cancelled,  # results cannot be obtained
 }
 
 # OBX-2 data type -> how OBX-5 is carried (docs/DATA_MODEL.md polymorphic values).
@@ -327,25 +348,24 @@ def _observation_value(obx: _Seg) -> m.ObservationValue | None:
     raise MappingError("UNMAPPED_OBX2_TYPE", f"OBX-2 data type {obx2!r} has no mapping")
 
 
+def _observation(obx: _Seg) -> m.Observation:
+    code = _codeable(obx, 3)
+    if code is None:
+        raise MappingError("MISSING_OBX3", "OBX-3 (observation code) is required")
+    return m.Observation(
+        observation_code=code,
+        value_type=obx.field(2) or None,
+        value=_observation_value(obx),
+        unit=obx.comp(6, 1) or None,
+        reference_range=obx.field(7) or None,
+        interpretation=obx.reps(8),
+        status=_OBS_STATUS.get(obx.field(11).upper()) if obx.field(11) else None,
+        effective_time=_parse_ts(obx.field(14)),
+    )
+
+
 def map_observations(segs: dict[str, list[_Seg]]) -> list[m.Observation]:
-    out: list[m.Observation] = []
-    for obx in segs.get("OBX", []):
-        code = _codeable(obx, 3)
-        if code is None:
-            raise MappingError("MISSING_OBX3", "OBX-3 (observation code) is required")
-        out.append(
-            m.Observation(
-                observation_code=code,
-                value_type=obx.field(2) or None,
-                value=_observation_value(obx),
-                unit=obx.comp(6, 1) or None,
-                reference_range=obx.field(7) or None,
-                interpretation=obx.reps(8),
-                status=_OBS_STATUS.get(obx.field(11).upper()) if obx.field(11) else None,
-                effective_time=_parse_ts(obx.field(14)),
-            )
-        )
-    return out
+    return [_observation(obx) for obx in segs.get("OBX", [])]
 
 
 def map_orders(segs: dict[str, list[_Seg]]) -> list[m.Order]:
@@ -371,6 +391,62 @@ def map_orders(segs: dict[str, list[_Seg]]) -> list[m.Order]:
     return orders
 
 
+def _diagnostic_report(obr: _Seg, observations: list[m.Observation]) -> m.DiagnosticReport | None:
+    """Build a DiagnosticReport from an OBR and the observations it groups.
+
+    Returns None if OBR-4 (the service identifier) is absent — a report needs a
+    code, but its observations are still captured, so we skip the grouping
+    rather than dead-letter the whole message.
+    """
+    code = _codeable(obr, 4)
+    if code is None:
+        return None
+    status_code = obr.field(25).upper()
+    filler = _identifier(obr, 3, type_code="FILL")
+    return m.DiagnosticReport(
+        identifiers=[filler] if filler else [],
+        code=code,
+        status=_OBR25_STATUS.get(status_code) if status_code else None,
+        effective_time=_parse_ts(obr.field(7)),
+        issued=_parse_ts(obr.field(22)),
+        results=[
+            m.Reference(type="Observation", canonical_id=o.canonical_id) for o in observations
+        ],
+    )
+
+
+def map_oru_results(raw: str) -> tuple[list[m.Observation], list[m.DiagnosticReport]]:
+    """Walk an ORU in wire order, grouping each OBR's following OBX segments into
+    one DiagnosticReport (OBR-25 status) that references those observations.
+
+    Returns the flat observation list and the reports, sharing the same
+    observation objects so the report→observation references stay consistent.
+    """
+    observations: list[m.Observation] = []
+    reports: list[m.DiagnosticReport] = []
+    current_obr: _Seg | None = None
+    current_obs: list[m.Observation] = []
+
+    def flush() -> None:
+        if current_obr is not None:
+            report = _diagnostic_report(current_obr, current_obs)
+            if report is not None:
+                reports.append(report)
+
+    for seg in _ordered_segments(raw):
+        name = seg.field(0)
+        if name == "OBR":
+            flush()
+            current_obr = seg
+            current_obs = []
+        elif name == "OBX":
+            obs = _observation(seg)
+            observations.append(obs)
+            current_obs.append(obs)
+    flush()
+    return observations, reports
+
+
 def map_message(parsed: ParsedMessage) -> CanonicalBundle:
     """Map a parsed HL7 message to canonical entities, dispatched by type.
 
@@ -384,7 +460,7 @@ def map_message(parsed: ParsedMessage) -> CanonicalBundle:
     elif parsed.message_code == "ORM":
         bundle.orders = map_orders(segs)
     elif parsed.message_code == "ORU":
-        bundle.observations = map_observations(segs)
+        bundle.observations, bundle.diagnostic_reports = map_oru_results(parsed.raw)
         bundle.orders = map_orders(segs)  # ORU may carry ORC/OBR context
 
     return bundle

@@ -44,6 +44,9 @@ _SERIALIZERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "Patient": lambda p: serialize.to_fhir_patient(m.Patient.model_validate(p)),
     "Encounter": lambda p: serialize.to_fhir_encounter(m.Encounter.model_validate(p)),
     "Observation": lambda p: serialize.to_fhir_observation(m.Observation.model_validate(p)),
+    "DiagnosticReport": lambda p: serialize.to_fhir_diagnostic_report(
+        m.DiagnosticReport.model_validate(p)
+    ),
 }
 
 # RBAC roles (SRS 5.1). read = view resources; write = create/update.
@@ -329,4 +332,52 @@ async def create_service_request(
     created = serialize.to_fhir_service_request(order)
     return await _persist_created(
         order, "ServiceRequest", created, session, principal, key_manager, blind_indexer
+    )
+
+
+@router.get("/DiagnosticReport")
+async def search_diagnostic_report(
+    session: SessionDep,
+    principal: PrincipalDep,
+    key_manager: KeyDep,
+    blind_indexer: BlindDep,
+    identifier: str,
+) -> JSONResponse:
+    """Search diagnostic reports by identifier (filler order number) via the blind index."""
+    return await _search_by_identifier(
+        "DiagnosticReport", identifier, session, principal, key_manager, blind_indexer
+    )
+
+
+@router.get("/DiagnosticReport/{canonical_id}")
+async def read_diagnostic_report(
+    canonical_id: UUID, session: SessionDep, principal: PrincipalDep, key_manager: KeyDep
+) -> JSONResponse:
+    """Return a stored diagnostic report as FHIR R4 (or a 404 OperationOutcome)."""
+    result = await _fetch("DiagnosticReport", canonical_id, session, principal, key_manager)
+    if isinstance(result, JSONResponse):
+        return result
+    return _respond(
+        "DiagnosticReport",
+        serialize.to_fhir_diagnostic_report(m.DiagnosticReport.model_validate(result.payload)),
+        principal,
+    )
+
+
+@router.post("/DiagnosticReport", status_code=201)
+async def create_diagnostic_report(
+    session: SessionDep,
+    principal: WritePrincipalDep,
+    key_manager: KeyDep,
+    blind_indexer: OptBlindDep,
+    body: Annotated[dict[str, Any], Body(media_type=_FHIR_JSON)],
+) -> JSONResponse:
+    """Create a DiagnosticReport from a FHIR R4 body. 201 + Location, or 400 on invalid."""
+    try:
+        report = serialize.from_fhir_diagnostic_report(body)
+    except FhirParseError as exc:
+        return _operation_outcome("invalid", f"invalid FHIR DiagnosticReport: {exc}", 400)
+    created = serialize.to_fhir_diagnostic_report(report)
+    return await _persist_created(
+        report, "DiagnosticReport", created, session, principal, key_manager, blind_indexer
     )

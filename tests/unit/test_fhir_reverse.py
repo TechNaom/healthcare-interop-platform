@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 from datetime import date
+from uuid import uuid4
 
 import pytest
 
 from hip.messaging.canonical import model as m
 from hip.messaging.canonical.fhir import (
     FhirParseError,
+    from_fhir_diagnostic_report,
     from_fhir_encounter,
     from_fhir_observation,
     from_fhir_patient,
     from_fhir_service_request,
+    to_fhir_diagnostic_report,
     to_fhir_observation,
     to_fhir_patient,
 )
@@ -143,3 +146,31 @@ def test_service_request_reverse_maps() -> None:
 def test_service_request_missing_required_rejected() -> None:
     with pytest.raises(FhirParseError):
         from_fhir_service_request({"resourceType": "ServiceRequest", "status": "active"})
+
+
+def test_diagnostic_report_reverse_maps_and_round_trips() -> None:
+    obs_id = uuid4()
+    report = from_fhir_diagnostic_report(
+        {
+            "resourceType": "DiagnosticReport",
+            "status": "final",
+            "code": {"coding": [{"code": "58410-2", "display": "CBC panel"}]},
+            "identifier": [{"value": "FILL-1"}],
+            "effectiveDateTime": "2026-01-02T03:04:00Z",
+            "result": [{"reference": f"Observation/{obs_id}"}],
+        }
+    )
+    assert report.status is m.DiagnosticReportStatus.final
+    assert report.code.coding[0].code == "58410-2"
+    assert [i.value for i in report.identifiers] == ["FILL-1"]
+    assert report.results[0].type == "Observation"
+    assert report.results[0].canonical_id == obs_id
+
+    rendered = to_fhir_diagnostic_report(report)
+    assert rendered["status"] == "final"
+    assert rendered["result"][0]["reference"] == f"Observation/{obs_id}"
+
+
+def test_diagnostic_report_missing_required_rejected() -> None:
+    with pytest.raises(FhirParseError):
+        from_fhir_diagnostic_report({"resourceType": "DiagnosticReport", "status": "final"})

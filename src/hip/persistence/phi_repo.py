@@ -140,6 +140,7 @@ class PhiRepository:
             resources.append(bundle.encounter)
         resources.extend(bundle.orders)
         resources.extend(bundle.observations)
+        resources.extend(bundle.diagnostic_reports)
         return [await self._upsert(r, actor=actor) for r in resources]
 
     async def get(self, canonical_id: UUID, *, actor: str) -> StoredResource | None:

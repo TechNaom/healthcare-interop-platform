@@ -5,8 +5,8 @@ rendered as FHIR R4 resources. Everything is built as a FHIR-JSON dict and then
 validated through ``fhir.resources`` (R4B) so the output is guaranteed
 well-formed R4 — invalid vocab or shapes fail here, not at the client.
 
-Scope now: Patient. Encounter/Observation/ServiceRequest follow the same pattern
-and land as the read API grows.
+Scope now: Patient/Encounter/Observation/ServiceRequest/DiagnosticReport, each
+with a forward (canonical→FHIR) and reverse (FHIR→canonical) mapper.
 """
 
 from __future__ import annotations
@@ -14,7 +14,9 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from enum import StrEnum
 from typing import Any
+from uuid import UUID
 
+from fhir.resources.R4B.diagnosticreport import DiagnosticReport as FHIRDiagnosticReport
 from fhir.resources.R4B.encounter import Encounter as FHIREncounter
 from fhir.resources.R4B.observation import Observation as FHIRObservation
 from fhir.resources.R4B.patient import Patient as FHIRPatient
@@ -286,6 +288,31 @@ def to_fhir_service_request(order: m.Order) -> dict[str, Any]:
     return FHIRServiceRequest.model_validate(data).model_dump(mode="json", exclude_none=True)
 
 
+def to_fhir_diagnostic_report(report: m.DiagnosticReport) -> dict[str, Any]:
+    """Render a canonical DiagnosticReport as a validated FHIR R4 JSON dict."""
+    data: dict[str, Any] = {
+        "resourceType": "DiagnosticReport",
+        "id": str(report.canonical_id),
+        # status and code are both 1..1 in R4.
+        "status": report.status.value if report.status else "unknown",
+        "code": _codeable_concept(report.code),
+    }
+    if report.identifiers:
+        data["identifier"] = [_identifier(i) for i in report.identifiers]
+    if report.patient_ref is not None:
+        data["subject"] = _reference(report.patient_ref)
+    if report.encounter_ref is not None:
+        data["encounter"] = _reference(report.encounter_ref)
+    if report.effective_time is not None:
+        data["effectiveDateTime"] = _fhir_datetime(report.effective_time)
+    if report.issued is not None:
+        data["issued"] = _fhir_datetime(report.issued)
+    if report.results:
+        data["result"] = [_reference(r) for r in report.results]
+
+    return FHIRDiagnosticReport.model_validate(data).model_dump(mode="json", exclude_none=True)
+
+
 # --------------------------------------------------------------------------- #
 # FHIR -> canonical (the write edge). Validate the incoming FHIR, then map from
 # the plain JSON so we don't wrestle with library value-types.
@@ -498,4 +525,37 @@ def from_fhir_service_request(data: dict[str, Any]) -> m.Order:
         intent=intent,
         ordered_item=_codeable_concept_in(code) if code else None,
         order_datetime=_datetime_in(authored),
+    )
+
+
+def _reference_in(data: dict[str, Any]) -> m.Reference | None:
+    """Parse a FHIR Reference (``Type/id`` and/or display) back to canonical."""
+    ref = data.get("reference") or ""
+    display = data.get("display")
+    if "/" in ref:
+        type_name, _, id_str = ref.partition("/")
+        try:
+            canonical_id: UUID | None = UUID(id_str)
+        except ValueError:
+            canonical_id = None
+        return m.Reference(type=type_name, canonical_id=canonical_id, display=display)
+    if display:  # display-only reference, no resolvable target
+        return m.Reference(type="Unknown", display=display)
+    return None
+
+
+def from_fhir_diagnostic_report(data: dict[str, Any]) -> m.DiagnosticReport:
+    """Map an incoming FHIR R4 DiagnosticReport to a new canonical one (fresh id)."""
+    try:
+        FHIRDiagnosticReport.model_validate(data)
+    except ValidationError as exc:
+        raise FhirParseError(str(exc)) from exc
+
+    return m.DiagnosticReport(
+        identifiers=[i for i in (_identifier_in(d) for d in data.get("identifier", [])) if i],
+        code=_codeable_concept_in(data.get("code", {})),
+        status=_enum_or_none(m.DiagnosticReportStatus, data.get("status")),
+        effective_time=_datetime_in(data.get("effectiveDateTime")),
+        issued=_datetime_in(data.get("issued")),
+        results=[r for r in (_reference_in(d) for d in data.get("result", [])) if r],
     )

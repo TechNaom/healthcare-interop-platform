@@ -426,6 +426,64 @@ def test_ingested_order_reads_as_service_request(clean_db: str, key_manager: Key
     assert resp.json()["intent"] == "order"
 
 
+_NEW_DIAGNOSTIC_REPORT: dict[str, Any] = {
+    "resourceType": "DiagnosticReport",
+    "status": "final",
+    "code": {"coding": [{"code": "58410-2", "system": "http://loinc.org", "display": "CBC"}]},
+    "identifier": [{"value": "DR-1"}],
+}
+
+
+def test_create_diagnostic_report_then_read(clean_db: str, key_manager: KeyManager) -> None:
+    read = asyncio.run(
+        _create_read(clean_db, key_manager, "/fhir/DiagnosticReport", _NEW_DIAGNOSTIC_REPORT)
+    )
+    assert read.status_code == 200
+    body = read.json()
+    assert body["resourceType"] == "DiagnosticReport"
+    assert body["status"] == "final"
+    assert body["code"]["coding"][0]["code"] == "58410-2"
+
+
+async def _ingest_oru_then_read_dr(url: str, km: KeyManager) -> httpx.Response:
+    engine = make_engine(url)
+    session_factory = make_sessionmaker(engine)
+    oru = (
+        "MSH|^~\\&|LAB|LF|RA|RF|20260825101500||ORU^R01|MID-ORU|P|2.5\r"
+        "PID|1||MRN1^^^HOSP^MR||DOE^JANE||19800101|F\r"
+        "OBR|1|PLAC1|FILL1|58410-2^CBC^LN|||||||||||||||||||||F\r"
+        "OBX|1|NM|718-7^Hgb^LN||13.5|g/dL||N|||F\r"
+    )
+    bundle = map_message(parse(oru))
+    assert bundle.diagnostic_reports
+    report_id = bundle.diagnostic_reports[0].canonical_id
+    async with session_factory() as session:
+        await PhiRepository(session, km).save_bundle(bundle)
+        await session.commit()
+
+    app = create_app()
+    app.state.engine = engine
+    app.state.session_factory = session_factory
+    app.state.authenticator = TokenAuthenticator(secret=_SECRET)
+    app.state.key_manager = km
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            f"/fhir/DiagnosticReport/{report_id}", headers=_auth_header("fhir:read", "phi:full")
+        )
+    await engine.dispose()
+    return resp
+
+
+def test_ingested_oru_reads_as_diagnostic_report(clean_db: str, key_manager: KeyManager) -> None:
+    resp = asyncio.run(_ingest_oru_then_read_dr(clean_db, key_manager))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["resourceType"] == "DiagnosticReport"
+    assert body["status"] == "final"
+    assert len(body["result"]) == 1  # references the ingested observation
+
+
 async def _hit_twice_with_limit(url: str, km: KeyManager) -> tuple[httpx.Response, httpx.Response]:
     from hip.gateway.ratelimit import RateLimiter
 

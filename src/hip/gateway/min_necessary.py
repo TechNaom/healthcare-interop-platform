@@ -29,6 +29,8 @@ _LIMITED_FIELDS: dict[str, frozenset[str]] = {
     "Observation": frozenset({"status", "code", "effectiveDateTime"}),
     # That an order exists and what was ordered — NOT subject/requester.
     "ServiceRequest": frozenset({"status", "intent", "code"}),
+    # That a report exists, its type and status — NOT the result references.
+    "DiagnosticReport": frozenset({"status", "code", "effectiveDateTime"}),
 }
 
 

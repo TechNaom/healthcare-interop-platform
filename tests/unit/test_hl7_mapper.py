@@ -60,6 +60,30 @@ def test_oru_maps_numeric_observation(oru_r01: str) -> None:
     assert obs.reference_range == "3.9-5.8"
 
 
+def test_oru_maps_diagnostic_report_grouping_observations(oru_r01: str) -> None:
+    bundle = map_message(parse(oru_r01))
+    assert len(bundle.diagnostic_reports) == 1
+    report = bundle.diagnostic_reports[0]
+    # code from OBR-4, identifier from OBR-3 (filler order number).
+    assert report.code.coding[0].code == "2339-0"
+    assert [i.value for i in report.identifiers] == ["FILL1"]
+    # the report references exactly the observation(s) under its OBR.
+    assert len(report.results) == 1
+    assert report.results[0].canonical_id == bundle.observations[0].canonical_id
+
+
+def test_oru_obr25_result_status_maps() -> None:
+    """OBR-25 result status drives DiagnosticReport.status."""
+    msg = _hl7(
+        "MSH|^~\\&|LAB|LF|RA|RF|20260825101500||ORU^R01|MID5|P|2.5",
+        "PID|1||MRN1^^^HOSP^MR||DOE^JANE||19800101|F",
+        "OBR|1|PLAC1|FILL1|58410-2^CBC^LN|||||||||||||||||||||F",
+        "OBX|1|NM|718-7^Hgb^LN||13.5|g/dL||N|||F",
+    )
+    report = map_message(parse(msg)).diagnostic_reports[0]
+    assert report.status is m.DiagnosticReportStatus.final
+
+
 def test_oru_coded_and_text_values() -> None:
     """OBX-5 type is driven by OBX-2 — coded (CE) and text (ST), not just numeric."""
     msg = _hl7(

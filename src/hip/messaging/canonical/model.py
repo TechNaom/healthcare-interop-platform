@@ -206,6 +206,19 @@ class ObservationStatus(StrEnum):
     unknown = "unknown"
 
 
+class DiagnosticReportStatus(StrEnum):
+    registered = "registered"
+    partial = "partial"
+    preliminary = "preliminary"
+    final = "final"
+    amended = "amended"
+    corrected = "corrected"
+    appended = "appended"
+    cancelled = "cancelled"
+    entered_in_error = "entered-in-error"
+    unknown = "unknown"
+
+
 class FailureStage(StrEnum):
     parse = "parse"
     validate = "validate"
@@ -304,6 +317,19 @@ class Observation(CanonicalResource):
     status: ObservationStatus | None = None  # OBX-11
     effective_time: datetime | None = None  # OBX-14
     performer: Reference | None = None  # OBX-16
+    patient_ref: Reference | None = None
+    encounter_ref: Reference | None = None
+
+
+class DiagnosticReport(CanonicalResource):
+    """ORU OBR -> FHIR DiagnosticReport. Groups the observations produced under
+    one order/report (OBR), carrying the report-level result status (OBR-25)."""
+
+    code: CodeableConcept  # OBR-4 universal service identifier — what was reported
+    status: DiagnosticReportStatus | None = None  # OBR-25 result status
+    effective_time: datetime | None = None  # OBR-7 observation datetime
+    issued: datetime | None = None  # OBR-22 results report/status change datetime
+    results: list[Reference] = Field(default_factory=list)  # references to Observations
     patient_ref: Reference | None = None
     encounter_ref: Reference | None = None
 
