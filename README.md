@@ -44,7 +44,10 @@ helm upgrade --install hip deploy/helm/hip \
   --set image.tag=<tag>
 ```
 
-See the [chart README](deploy/helm/hip/README.md) for details.
+See the [chart README](deploy/helm/hip/README.md) for details. For a managed-cloud
+deployment (same image, managed Postgres/secrets/OIDC via configuration) see
+[docs/CLOUD_NATIVE.md](docs/CLOUD_NATIVE.md), the [cloud values overlay](deploy/helm/hip/values-cloud.yaml),
+and the [Terraform reference](deploy/terraform/aws).
 
 ## Documentation map
 
@@ -56,6 +59,7 @@ See the [chart README](deploy/helm/hip/README.md) for details.
 | [docs/TECH_STACK.md](docs/TECH_STACK.md) | The complete stack in one place, what to install locally, and what we deliberately don't use (no cloud, no Kubernetes for now) |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Component diagram, deployment view, technology stack, Python↔C++ boundary |
 | [docs/DESIGN.md](docs/DESIGN.md) | Module breakdown, sequence diagrams, error handling, pluggable-infrastructure interfaces |
+| [docs/CLOUD_NATIVE.md](docs/CLOUD_NATIVE.md) | Cloud-agnostic deployment: the config seam (managed Postgres/secrets/OIDC), Helm cloud overlay, Terraform reference, and the no-PHI-in-TechNaom-cloud constraint |
 | [docs/DATA_MODEL.md](docs/DATA_MODEL.md) | Canonical model entities and the HL7 v2 ↔ canonical ↔ FHIR field mapping |
 | [docs/SECURITY_AND_COMPLIANCE.md](docs/SECURITY_AND_COMPLIANCE.md) | HIPAA technical-safeguards mapping, encryption, RBAC roles, de-identification, BAA policy |
 | [docs/TEST_STRATEGY.md](docs/TEST_STRATEGY.md) | Where test data comes from (synthetic only), how it's loaded, test pyramid, compliance tests, environments |

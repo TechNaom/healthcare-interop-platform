@@ -1,0 +1,46 @@
+# Cloud-native overlay for the HIP chart — the SAME OCI image, with the
+# self-hosted components swapped for managed ones via configuration (ADR-003).
+# Nothing here is cloud-vendor-specific in the app; the Terraform in
+# deploy/terraform provisions the managed pieces this overlay references.
+#
+#   helm upgrade --install hip deploy/helm/hip -f deploy/helm/hip/values-cloud.yaml \
+#     --set image.repository=<registry>/healthcare-interop-platform-app \
+#     --set image.tag=<tag> --set config.jwtJwksUrl=<oidc-jwks-url>
+#
+# IMPORTANT (ADR-005 + BAA): the client deploys this in THEIR OWN cloud account
+# under THEIR BAA. TechNaom never hosts client PHI. Point database.existingSecret
+# and secrets.existingSecret at Secrets synced from the cloud secret manager
+# (e.g. External Secrets Operator ← AWS Secrets Manager / GCP Secret Manager).
+
+gateway:
+  replicaCount: 3
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 12
+    targetCPUUtilizationPercentage: 70
+
+mllp:
+  enabled: true
+  replicaCount: 2
+
+config:
+  logJson: "1"
+  # Managed identity provider (Keycloak/Cognito/Entra) — validated via live JWKS.
+  jwtJwksUrl: "" # set per environment, e.g. via --set
+
+# Managed Postgres (RDS / Cloud SQL / Azure DB). The URL lives only in the
+# referenced Secret, synced from the cloud secret store — never in values.
+database:
+  existingSecret: hip-db # Secret with key: database-url (points at the managed DB)
+
+# Encryption / blind-index keys from the cloud secret manager (via External
+# Secrets). No jwt-secret needed when config.jwtJwksUrl is set.
+secrets:
+  existingSecret: hip-secrets # Secret with keys: encryption-key, blind-index-key
+
+ingress:
+  enabled: true
+  className: alb # or nginx/gce — environment-specific
+  host: hip.example.com
+  tls: true

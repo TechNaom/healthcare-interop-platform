@@ -52,9 +52,14 @@ from the referenced Secret(s); non-secret config is inline.
     secretKeyRef:
       name: {{ .Values.secrets.existingSecret | default (printf "%s-secrets" (include "hip.fullname" .)) }}
       key: blind-index-key
+{{- if .Values.config.jwtJwksUrl }}
+- name: HIP_JWT_JWKS_URL
+  value: {{ .Values.config.jwtJwksUrl | quote }}
+{{- else }}
 - name: HIP_JWT_SECRET
   valueFrom:
     secretKeyRef:
       name: {{ .Values.secrets.existingSecret | default (printf "%s-secrets" (include "hip.fullname" .)) }}
       key: jwt-secret
+{{- end }}
 {{- end -}}

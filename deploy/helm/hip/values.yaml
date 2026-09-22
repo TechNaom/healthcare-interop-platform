@@ -36,6 +36,10 @@ config:
   logJson: "1"
   rateLimit: "600"
   rateWindowSeconds: "60"
+  # For a managed/cloud OIDC provider, set the realm JWKS URL; the gateway then
+  # validates tokens via live JWKS and no jwt-secret is required. Leave empty to
+  # use the HS256 shared secret (self-hosted / dev) from the secret store.
+  jwtJwksUrl: ""
 
 # Database connection. Prefer `existingSecret` (a Secret with key `database-url`)
 # so the URL never lands in values. `url` is a convenience for dev only.
