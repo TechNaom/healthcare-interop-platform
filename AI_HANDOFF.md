@@ -54,15 +54,17 @@ Docker/Buildx/Compose · GitHub Actions · `uv` · ruff · mypy · bandit · git
 
 ## Current state
 
-~90% of the AI-compressed pilot scope, all on `main` (direct-to-main workflow,
-no PRs/branches, since 2026-08-25). The full pipeline runs end to end against
-real Postgres/Docker: HL7 v2 over MLLP → parse/route/map → encrypted
-persistence + audit → de-id copy → JWT+RBAC+minimum-necessary-gated FHIR R4
-API (Patient/Encounter/Observation/ServiceRequest read+write, Patient search),
-plus rate limiting, OTel metrics, a Helm chart, and DB-grant compliance tests.
-See [PROJECT_STATE.md](PROJECT_STATE.md) for the current status and what's
-still open (Synthea bulk fixtures, Encounter/Observation search,
-DiagnosticReport, cloud-native variant).
+Functional pilot core complete, all on `main` (direct-to-main workflow, no
+PRs/branches, since 2026-08-25). The full pipeline runs end to end against real
+Postgres/Docker: HL7 v2 over MLLP → parse/route/map → encrypted persistence +
+audit → de-id copy → JWT+RBAC+minimum-necessary-gated FHIR R4 API. FHIR resource
+set (all read+write): Patient/Encounter/Observation/ServiceRequest/
+DiagnosticReport; identifier search on Patient/Encounter/Observation/
+DiagnosticReport. Plus rate limiting, OTel metrics, real Keycloak JWKS +
+Vault-backed keys, a Helm chart (self-hosted + cloud overlay + Terraform
+reference), a synthetic-population generator, and DB-grant compliance tests. See
+[PROJECT_STATE.md](PROJECT_STATE.md) for what's still open (full OTel tracing,
+more ingestion transports, standing up the cloud reference, C++ validator).
 
 ## What NOT to change without a new ADR
 

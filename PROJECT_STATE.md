@@ -13,39 +13,47 @@ unit. Full context: [README.md](README.md) → [Healthcare Interop Platform.md](
 
 ## Current status
 
-**~90% of the AI-compressed pilot scope. Direct-to-`main` workflow (no PRs/branches, per 2026-08-25 decision) — every phase below is merged and CI-green.**
+**Functional pilot core complete. Direct-to-`main` workflow (no PRs/branches, per 2026-08-25 decision) — every phase below is merged and CI-green.**
 
 Working end to end, verified against real Postgres and (for the core stack)
 real Docker: **HL7 v2 over MLLP → parse/route/map to the canonical model →
 encrypted persistence + append-only audit → de-identified copy →
-JWT-authenticated + RBAC-gated + minimum-necessary-filtered FHIR R4 API**
-(Patient/Encounter/Observation/ServiceRequest, read + write + blind-index
-search on Patient), plus rate limiting, OTel metrics, a Helm chart, and DB-grant
-compliance tests (audit immutability, store separation). All HIPAA technical
-safeguards from `docs/SECURITY_COMPLIANCE.md` are implemented at least once.
+JWT-authenticated + RBAC-gated + minimum-necessary-filtered FHIR R4 API**, plus
+rate limiting, OTel metrics, a Helm chart, and DB-grant compliance tests (audit
+immutability, store separation). All HIPAA technical safeguards from
+`docs/SECURITY_AND_COMPLIANCE.md` are implemented at least once.
 
-**Just landed (this session):** real Keycloak JWKS support in `gateway.auth`
-(`HIP_JWT_JWKS_URL`, live per-token key lookup by `kid`) and Vault-backed
-`KeyManager`/`BlindIndexer` (`security.vault`, KV-v2 read, takes priority over
-the static `HIP_ENCRYPTION_KEY`/`HIP_BLIND_INDEX_KEY` env vars when
-`HIP_VAULT_ADDR` is set). `docker-compose.infra.yml` wires the `keycloak` +
-`vault` services (behind the `infra` profile) into `app`/`mllp`; `minio` stays
-declared-but-unwired since no phase needs blob storage yet.
+**FHIR resource set (all read + write):** Patient, Encounter, Observation,
+ServiceRequest, DiagnosticReport. **Identifier search (blind index):** Patient,
+Encounter, Observation, DiagnosticReport. HL7 ORU now also produces a
+DiagnosticReport (OBR-25 status) grouping its observations.
 
-**Still open** (roughly in priority order): Synthea bulk fixtures for
-realistic-volume demo/perf data; FHIR search for Encounter/Observation
-(currently Patient-only); DiagnosticReport resource (HL7 OBR-25, a documented
-deferral since the ADR-001 review); cloud-native variant (self-hosted core is
-deliberately built first, per the 2026-08-25 deployment decision).
+**Security key sourcing:** real Keycloak JWKS in `gateway.auth`
+(`HIP_JWT_JWKS_URL`, live per-token lookup by `kid`) and Vault-backed
+`KeyManager`/`BlindIndexer` (`security.vault`, KV-v2, priority over the static
+env keys when `HIP_VAULT_ADDR` is set). `docker-compose.infra.yml` wires
+keycloak + vault into `app`/`mllp` (infra profile); `minio` stays
+declared-but-unwired (no blob-storage consumer yet).
 
-For the detailed build log (every phase, commit, and gotcha), see the
-`project-healthcare-interop-platform` memory record — this file stays a
-high-level snapshot.
+**Demo/load data:** `hip.synthetic` — deterministic synthetic population
+(HL7 v2 + FHIR renderings, ADR-005), driven by `scripts/seed.py` and the locust
+load test.
+
+**Cloud-native:** same OCI image, managed services via config (ADR-003) —
+`deploy/helm/hip/values-cloud.yaml` overlay, `deploy/terraform/aws` reference
+module, and `docs/CLOUD_NATIVE.md` (the config seam + no-PHI-in-TechNaom-cloud
+constraint). The app code is already cloud-agnostic; the Terraform is a reviewed
+reference, not yet `apply`-ed.
+
+**What's NOT done** (beyond the functional pilot): full distributed OTel tracing
+(only metrics + structured logging today); production hardening/pen-test/formal
+HIPAA certification (a separate, much larger track); HTTP/file-drop ingestion
+transports; the C++ high-throughput validator (ADR-006 defers it). See the
+`project-healthcare-interop-platform` memory record for the detailed build log.
 
 ### ADR-001 gate: cleared 2026-08-25
 The canonical model was reviewed against `docs/DATA_MODEL.md` v0.2.0 and HL7/FHIR
-correctness (findings: 1 comment typo fixed; DiagnosticReport/OBR-25 remains a
-documented deferral).
+correctness (findings: 1 comment typo fixed; DiagnosticReport/OBR-25 now built).
 
 ## Timeline — 12-week AI-orchestrated track
 
@@ -56,12 +64,12 @@ documented deferral).
 | 3 | Skeletons (gRPC stub deferred — ADR-006) | ✅ gateway skeleton + health done |
 | 4–5 | HL7 ingestion built, then hardened | ✅ MLLP listener + parse + route + ACK/NACK |
 | 6 | HL7→FHIR mapping, FHIR CRUD core | ✅ HL7→canonical + canonical→FHIR; Patient/Encounter/Observation/ServiceRequest read+write |
-| 7 | FHIR completeness | 🔨 Patient search (blind index) done; Encounter/Observation search + DiagnosticReport still open |
+| 7 | FHIR completeness | ✅ Patient/Encounter/Observation/ServiceRequest/DiagnosticReport read+write; identifier search on Patient/Encounter/Observation/DiagnosticReport |
 | 8 | Python validator hardening (C++ deferred — ADR-006) | ⬜ |
 | 9 | Persistence, RBAC, audit log, KeyManager | ✅ Postgres+Alembic, encryption at rest, JWT auth + RBAC + minimum-necessary, real Keycloak JWKS + Vault-backed keys |
 | 10 | Safe Harbor de-id, OpenTelemetry | ✅ de-id store + OTel metrics/Prometheus done; full distributed tracing not yet |
-| 11 | Integration testing + bug-fix buffer | 🔨 DB-grant compliance tests, rate limiting, Helm chart, compose demo done; Synthea bulk fixtures still open |
-| 12 | Stabilization, demo, retrospective | ⬜ |
+| 11 | Integration testing + bug-fix buffer | ✅ DB-grant compliance tests, rate limiting, Helm chart, compose demo, synthetic population + load test |
+| 12 | Stabilization, demo, retrospective | 🔨 demo + cloud-native artifacts done; final hardening/retrospective open |
 
 ## Architecture decisions (authoritative log: [docs/DECISIONS.md](docs/DECISIONS.md))
 
@@ -152,10 +160,10 @@ TEST_STRATEGY.md section 8.
 
 ## Next recommended task
 
-Pick one of: **Synthea bulk fixtures** (realistic-volume synthetic data for
-demo/perf, replacing the hand-written ADT/ORU/ORM fixtures used so far),
-**FHIR search for Encounter/Observation** (extend the blind-index pattern
-already built for Patient), or **DiagnosticReport** (the HL7 OBR-25 mapping
-deferred at the ADR-001 review). The self-hosted core is intentionally built
-before the cloud-native variant (2026-08-25 deployment decision) — don't start
-that until the items above are done.
+The functional pilot is feature-complete. Remaining work is hardening, not new
+features: **full OpenTelemetry tracing** (spans across ingest→persist→API; only
+metrics + structured logging exist today), **additional ingestion transports**
+(HTTP/file-drop alongside MLLP), and, when the client is ready, **actually
+standing up the cloud-native reference** (`terraform apply` in their account +
+an end-to-end managed-services smoke test). The C++ high-throughput validator
+(ADR-006) remains a deliberately deferred future phase.
