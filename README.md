@@ -28,6 +28,12 @@ Requires Docker + `uv`. The generated `.env` holds **local-only** keys (gitignor
 
 To run against real Keycloak (JWKS) + Vault instead of static env secrets, see [docker-compose.infra.yml](docker-compose.infra.yml).
 
+To load a reproducible synthetic patient population (for demo volume or load testing — synthetic only, ADR-005):
+
+```bash
+HIP_JWT_SECRET=<gateway secret> uv run python scripts/seed.py --count 100
+```
+
 ## Deploy to Kubernetes
 
 A Helm chart is in [deploy/helm/hip](deploy/helm/hip) (gateway + MLLP listener + migration hook Job). Point it at the client's own Postgres and secret store — no cloud-vendor dependency (ADR-003):
