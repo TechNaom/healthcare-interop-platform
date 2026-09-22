@@ -232,6 +232,8 @@ def to_fhir_observation(observation: m.Observation) -> dict[str, Any]:
         "status": observation.status.value if observation.status else "unknown",
         "code": _codeable_concept(observation.observation_code),
     }
+    if observation.identifiers:
+        data["identifier"] = [_identifier(i) for i in observation.identifiers]
     if observation.value is not None:
         data.update(_observation_value(observation.value))
     if observation.patient_ref is not None:
@@ -453,6 +455,7 @@ def from_fhir_observation(data: dict[str, Any]) -> m.Observation:
 
     ranges = data.get("referenceRange") or []
     return m.Observation(
+        identifiers=[i for i in (_identifier_in(d) for d in data.get("identifier", [])) if i],
         observation_code=_codeable_concept_in(data.get("code", {})),
         status=_enum_or_none(m.ObservationStatus, data.get("status")),
         value=_observation_value_in(data),

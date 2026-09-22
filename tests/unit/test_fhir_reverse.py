@@ -13,6 +13,7 @@ from hip.messaging.canonical.fhir import (
     from_fhir_observation,
     from_fhir_patient,
     from_fhir_service_request,
+    to_fhir_observation,
     to_fhir_patient,
 )
 
@@ -101,6 +102,21 @@ def test_observation_reverse_maps_polymorphic_value() -> None:
 def test_observation_missing_required_fields_rejected() -> None:
     with pytest.raises(FhirParseError):
         from_fhir_observation({"resourceType": "Observation"})  # status + code are 1..1
+
+
+def test_observation_identifier_round_trips() -> None:
+    """Identifier must survive FHIR->canonical->FHIR so it can be blind-indexed for search."""
+    obs = from_fhir_observation(
+        {
+            "resourceType": "Observation",
+            "status": "final",
+            "code": {"coding": [{"code": "2339-0"}]},
+            "identifier": [{"system": "LAB", "value": "OBS-77"}],
+        }
+    )
+    assert [i.value for i in obs.identifiers] == ["OBS-77"]
+    rendered = to_fhir_observation(obs)
+    assert any(i["value"] == "OBS-77" for i in rendered["identifier"])
 
 
 def test_service_request_reverse_maps() -> None:

@@ -305,6 +305,78 @@ _NEW_SERVICE_REQUEST: dict[str, Any] = {
 }
 
 
+_SEARCHABLE_OBSERVATION: dict[str, Any] = {
+    **_NEW_OBSERVATION,
+    "identifier": [{"value": "OBS-77"}],
+}
+
+
+async def _create_then_search_generic(  # noqa: PLR0913, PLR0917 - cohesive test helper
+    url: str,
+    km: KeyManager,
+    bi: object,
+    path: str,
+    body: dict[str, Any],
+    query: str,
+) -> httpx.Response:
+    engine = make_engine(url)
+    session_factory = make_sessionmaker(engine)
+    app = create_app()
+    app.state.engine = engine
+    app.state.session_factory = session_factory
+    app.state.authenticator = TokenAuthenticator(secret=_SECRET)
+    app.state.key_manager = km
+    app.state.blind_indexer = bi
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        created = await client.post(path, json=body, headers=_auth_header("fhir:write"))
+        assert created.status_code == 201, created.text
+        hit = await client.get(query, headers=_auth_header("fhir:read", "phi:full"))
+    await engine.dispose()
+    return hit
+
+
+def test_search_encounter_by_identifier(
+    clean_db: str, key_manager: KeyManager, blind_indexer: object
+) -> None:
+    hit = asyncio.run(
+        _create_then_search_generic(
+            clean_db,
+            key_manager,
+            blind_indexer,
+            "/fhir/Encounter",
+            _NEW_ENCOUNTER,
+            "/fhir/Encounter?identifier=VISIT-1",
+        )
+    )
+    assert hit.status_code == 200
+    bundle = hit.json()
+    assert bundle["type"] == "searchset"
+    assert bundle["total"] == 1
+    assert bundle["entry"][0]["resource"]["resourceType"] == "Encounter"
+
+
+def test_search_observation_by_identifier(
+    clean_db: str, key_manager: KeyManager, blind_indexer: object
+) -> None:
+    hit = asyncio.run(
+        _create_then_search_generic(
+            clean_db,
+            key_manager,
+            blind_indexer,
+            "/fhir/Observation",
+            _SEARCHABLE_OBSERVATION,
+            "/fhir/Observation?identifier=OBS-77",
+        )
+    )
+    assert hit.status_code == 200
+    bundle = hit.json()
+    assert bundle["type"] == "searchset"
+    assert bundle["total"] == 1
+    assert bundle["entry"][0]["resource"]["resourceType"] == "Observation"
+
+
 def test_create_service_request_then_read(clean_db: str, key_manager: KeyManager) -> None:
     read = asyncio.run(
         _create_read(clean_db, key_manager, "/fhir/ServiceRequest", _NEW_SERVICE_REQUEST)

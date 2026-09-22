@@ -3,11 +3,13 @@
 Maps to ``gateway.api.fhir`` in docs/DESIGN.md 1. Reads target the canonical
 model (ADR-001) and render it as FHIR via ``canonical.fhir`` — routes never touch
 HL7. Responses use ``application/fhir+json`` and a FHIR ``OperationOutcome`` on
-error. Scope now: Patient/Encounter/Observation reads; write and search follow.
+error. Scope now: Patient/Encounter/Observation/ServiceRequest read + write, and
+identifier search for Patient/Encounter/Observation via the blind index.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -34,6 +36,15 @@ from hip.security.keymanager import KeyManager
 router = APIRouter(prefix="/fhir", tags=["fhir"])
 
 _FHIR_JSON = "application/fhir+json"
+
+# Per-resource serializer: parse the stored payload into its canonical model and
+# render it as FHIR. Used by the shared identifier-search helper so each search
+# route is a one-liner (the read routes call the typed serializers directly).
+_SERIALIZERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
+    "Patient": lambda p: serialize.to_fhir_patient(m.Patient.model_validate(p)),
+    "Encounter": lambda p: serialize.to_fhir_encounter(m.Encounter.model_validate(p)),
+    "Observation": lambda p: serialize.to_fhir_observation(m.Observation.model_validate(p)),
+}
 
 # RBAC roles (SRS 5.1). read = view resources; write = create/update.
 _READ_ROLE = "fhir:read"
@@ -84,22 +95,24 @@ async def _fetch(  # noqa: PLR0913 - cohesive read helper shared by all read rou
     return stored
 
 
-@router.get("/Patient")
-async def search_patient(
-    session: SessionDep,
-    principal: PrincipalDep,
-    key_manager: KeyDep,
-    blind_indexer: BlindDep,
+async def _search_by_identifier(  # noqa: PLR0913, PLR0917 - cohesive search helper shared by all search routes
+    resource_type: str,
     identifier: str,
+    session: AsyncSession,
+    principal: Principal,
+    key_manager: KeyManager,
+    blind_indexer: BlindIndexer,
 ) -> JSONResponse:
-    """Search patients by identifier via the blind index. Returns a FHIR Bundle.
+    """Search ``resource_type`` by identifier via the blind index → FHIR Bundle.
 
     ``identifier`` may be ``system|value`` or a bare ``value``; the value is
-    matched exactly against the HMAC index (no plaintext hits the query).
+    matched exactly against the HMAC index (no plaintext hits the query). Each
+    entry is minimum-necessary filtered for the caller and read-audited.
     """
     value = identifier.rsplit("|", 1)[-1]
+    serialize_payload = _SERIALIZERS[resource_type]
     repo = PhiRepository(session, key_manager, blind_indexer)
-    ids = await repo.find_ids_by_identifier("Patient", value)
+    ids = await repo.find_ids_by_identifier(resource_type, value)
 
     full = principal.has_role(FULL_ACCESS_ROLE)
     entries: list[dict[str, Any]] = []
@@ -107,8 +120,10 @@ async def search_patient(
         stored = await repo.get(canonical_id, actor=principal.subject)
         if stored is None:
             continue
-        resource = serialize.to_fhir_patient(m.Patient.model_validate(stored.payload))
-        entries.append({"resource": apply_minimum_necessary("Patient", resource, full_access=full)})
+        resource = serialize_payload(stored.payload)
+        entries.append(
+            {"resource": apply_minimum_necessary(resource_type, resource, full_access=full)}
+        )
     await session.commit()
 
     bundle: dict[str, Any] = {
@@ -118,6 +133,48 @@ async def search_patient(
         "entry": entries,
     }
     return JSONResponse(bundle, media_type=_FHIR_JSON)
+
+
+@router.get("/Patient")
+async def search_patient(
+    session: SessionDep,
+    principal: PrincipalDep,
+    key_manager: KeyDep,
+    blind_indexer: BlindDep,
+    identifier: str,
+) -> JSONResponse:
+    """Search patients by identifier via the blind index. Returns a FHIR Bundle."""
+    return await _search_by_identifier(
+        "Patient", identifier, session, principal, key_manager, blind_indexer
+    )
+
+
+@router.get("/Encounter")
+async def search_encounter(
+    session: SessionDep,
+    principal: PrincipalDep,
+    key_manager: KeyDep,
+    blind_indexer: BlindDep,
+    identifier: str,
+) -> JSONResponse:
+    """Search encounters by identifier (visit or account number) via the blind index."""
+    return await _search_by_identifier(
+        "Encounter", identifier, session, principal, key_manager, blind_indexer
+    )
+
+
+@router.get("/Observation")
+async def search_observation(
+    session: SessionDep,
+    principal: PrincipalDep,
+    key_manager: KeyDep,
+    blind_indexer: BlindDep,
+    identifier: str,
+) -> JSONResponse:
+    """Search observations by identifier via the blind index."""
+    return await _search_by_identifier(
+        "Observation", identifier, session, principal, key_manager, blind_indexer
+    )
 
 
 @router.get("/Patient/{canonical_id}")
