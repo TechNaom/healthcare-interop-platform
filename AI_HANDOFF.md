@@ -62,9 +62,10 @@ set (all read+write): Patient/Encounter/Observation/ServiceRequest/
 DiagnosticReport; identifier search on Patient/Encounter/Observation/
 DiagnosticReport. Plus rate limiting, OTel metrics, real Keycloak JWKS +
 Vault-backed keys, a Helm chart (self-hosted + cloud overlay + Terraform
-reference), a synthetic-population generator, and DB-grant compliance tests. See
-[PROJECT_STATE.md](PROJECT_STATE.md) for what's still open (full OTel tracing,
-more ingestion transports, standing up the cloud reference, C++ validator).
+reference), a synthetic-population generator, DB-grant compliance tests, and full
+observability (structured logs + OTel metrics + distributed tracing). See
+[PROJECT_STATE.md](PROJECT_STATE.md) for what's still open (more ingestion
+transports, standing up the cloud reference, C++ validator).
 
 ## What NOT to change without a new ADR
 

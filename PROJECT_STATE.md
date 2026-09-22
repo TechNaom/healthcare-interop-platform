@@ -45,10 +45,16 @@ module, and `docs/CLOUD_NATIVE.md` (the config seam + no-PHI-in-TechNaom-cloud
 constraint). The app code is already cloud-agnostic; the Terraform is a reviewed
 reference, not yet `apply`-ed.
 
-**What's NOT done** (beyond the functional pilot): full distributed OTel tracing
-(only metrics + structured logging today); production hardening/pen-test/formal
-HIPAA certification (a separate, much larger track); HTTP/file-drop ingestion
-transports; the C++ high-throughput validator (ADR-006 defers it). See the
+**Observability:** structured JSON logs (no-PHI test), OTel metrics with a
+Prometheus `/metrics` endpoint, and OTel distributed **tracing** across HL7
+ingest (`hl7.ingest`/`hl7.persist`) and every FHIR request (server span), with
+optional OTLP/HTTP export (`HIP_OTLP_ENDPOINT`) — span attributes are
+control-plane only, guarded by a no-PHI test.
+
+**What's NOT done** (beyond the functional pilot): production hardening/pen-test/
+formal HIPAA certification (a separate, much larger track); HTTP/file-drop
+ingestion transports; the C++ high-throughput validator (ADR-006 defers it);
+standing up the cloud-native reference for real (`terraform apply`). See the
 `project-healthcare-interop-platform` memory record for the detailed build log.
 
 ### ADR-001 gate: cleared 2026-08-25
@@ -67,7 +73,7 @@ correctness (findings: 1 comment typo fixed; DiagnosticReport/OBR-25 now built).
 | 7 | FHIR completeness | ✅ Patient/Encounter/Observation/ServiceRequest/DiagnosticReport read+write; identifier search on Patient/Encounter/Observation/DiagnosticReport |
 | 8 | Python validator hardening (C++ deferred — ADR-006) | ⬜ |
 | 9 | Persistence, RBAC, audit log, KeyManager | ✅ Postgres+Alembic, encryption at rest, JWT auth + RBAC + minimum-necessary, real Keycloak JWKS + Vault-backed keys |
-| 10 | Safe Harbor de-id, OpenTelemetry | ✅ de-id store + OTel metrics/Prometheus done; full distributed tracing not yet |
+| 10 | Safe Harbor de-id, OpenTelemetry | ✅ de-id store + OTel metrics/Prometheus + distributed tracing (ingest + gateway spans, OTLP export) |
 | 11 | Integration testing + bug-fix buffer | ✅ DB-grant compliance tests, rate limiting, Helm chart, compose demo, synthetic population + load test |
 | 12 | Stabilization, demo, retrospective | 🔨 demo + cloud-native artifacts done; final hardening/retrospective open |
 
@@ -161,9 +167,8 @@ TEST_STRATEGY.md section 8.
 ## Next recommended task
 
 The functional pilot is feature-complete. Remaining work is hardening, not new
-features: **full OpenTelemetry tracing** (spans across ingest→persist→API; only
-metrics + structured logging exist today), **additional ingestion transports**
-(HTTP/file-drop alongside MLLP), and, when the client is ready, **actually
-standing up the cloud-native reference** (`terraform apply` in their account +
-an end-to-end managed-services smoke test). The C++ high-throughput validator
-(ADR-006) remains a deliberately deferred future phase.
+features: **additional ingestion transports** (HTTP/file-drop alongside MLLP),
+and, when the client is ready, **actually standing up the cloud-native
+reference** (`terraform apply` in their account + an end-to-end managed-services
+smoke test). The C++ high-throughput validator (ADR-006) remains a deliberately
+deferred future phase.
