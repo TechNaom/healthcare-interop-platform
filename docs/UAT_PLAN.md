@@ -36,16 +36,20 @@ touches **only public interfaces**, and uses **synthetic data only** ([ADR-005](
 
 ## Sign-off (per release candidate)
 
+Automated tests for all eight scenarios pass against synthetic data on real
+Postgres (`pytest -m uat`); the human-acceptor column stays open until a release
+candidate is formally accepted.
+
 | ID | Automated test passing | Human acceptor | Date | Notes |
 |---|---|---|---|---|
-| UAT-01 | ☐ | | | |
-| UAT-02 | ☐ | | | |
-| UAT-03 | ☐ | | | |
-| UAT-04 | ☐ | | | |
-| UAT-05 | ☐ | | | |
-| UAT-06 | ☐ | | | |
-| UAT-07 | ☐ | | | |
-| UAT-08 | ☐ | | | |
+| UAT-01 | ☑ | | | ADT over MLLP → FHIR read, fields match |
+| UAT-02 | ☑ | | | de-identified store carries no Safe Harbor identifiers |
+| UAT-03 | ☑ | | | Patient CRUD + search; OperationOutcome on invalid |
+| UAT-04 | ☑ | | | ORM→Order (status derivation), ORU→Observations + DiagnosticReport |
+| UAT-05 | ☑ | | | 401/403 + minimum-necessary field reduction |
+| UAT-06 | ☑ | | | malformed → NACK + dead-letter, never dropped |
+| UAT-07 | ☑ | | | every read/write → append-only audit entry (who/what/when) |
+| UAT-08 | ☑ | | | health/readiness green; synthetic seed loads via real path |
 
 A release candidate ships only when every applicable row is both checked and
 signed. Scenarios whose phase hasn't been built yet are marked N/A for that

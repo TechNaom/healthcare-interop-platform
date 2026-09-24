@@ -3,8 +3,9 @@
 Maps to ``gateway.api.fhir`` in docs/DESIGN.md 1. Reads target the canonical
 model (ADR-001) and render it as FHIR via ``canonical.fhir`` — routes never touch
 HL7. Responses use ``application/fhir+json`` and a FHIR ``OperationOutcome`` on
-error. Scope now: Patient/Encounter/Observation/ServiceRequest read + write, and
-identifier search for Patient/Encounter/Observation via the blind index.
+error. Scope now: Patient/Encounter/Observation/ServiceRequest full CRUD (create,
+read, update via idempotent upsert, search) and identifier search for
+Patient/Encounter/Observation via the blind index.
 """
 
 from __future__ import annotations
@@ -241,6 +242,47 @@ async def _persist_created(  # noqa: PLR0913, PLR0917 - cohesive create helper f
     )
 
 
+# One reverse mapper (FHIR body -> canonical resource) per writable resource type.
+# ``save`` is an idempotent upsert keyed on ``canonical_id``, so create and update
+# share it — update just pins the id from the request path first.
+_REVERSE: dict[str, Callable[[dict[str, Any]], m.CanonicalResource]] = {
+    "Patient": serialize.from_fhir_patient,
+    "Encounter": serialize.from_fhir_encounter,
+    "Observation": serialize.from_fhir_observation,
+    "ServiceRequest": serialize.from_fhir_service_request,
+}
+_RENDER: dict[str, Callable[[Any], dict[str, Any]]] = {
+    "Patient": serialize.to_fhir_patient,
+    "Encounter": serialize.to_fhir_encounter,
+    "Observation": serialize.to_fhir_observation,
+    "ServiceRequest": serialize.to_fhir_service_request,
+}
+
+
+async def _update_resource(  # noqa: PLR0913, PLR0917 - cohesive update helper for 4 routes
+    resource_type: str,
+    canonical_id: UUID,
+    body: dict[str, Any],
+    session: AsyncSession,
+    principal: Principal,
+    key_manager: KeyManager,
+    blind_indexer: BlindIndexer | None,
+) -> JSONResponse:
+    """Update-or-create a resource at ``canonical_id`` from a FHIR body (FHIR PUT
+    upsert semantics), encrypted + audited. Returns 200 with the stored resource,
+    or a 400 OperationOutcome on invalid FHIR."""
+    try:
+        resource = _REVERSE[resource_type](body)
+    except FhirParseError as exc:
+        return _operation_outcome("invalid", f"invalid FHIR {resource_type}: {exc}", 400)
+    # Pin the identity to the request path so PUT targets that resource (the
+    # reverse mapper otherwise assigns a fresh canonical_id).
+    resource = resource.model_copy(update={"canonical_id": canonical_id})
+    await PhiRepository(session, key_manager, blind_indexer).save(resource, actor=principal.subject)
+    await session.commit()
+    return JSONResponse(_RENDER[resource_type](resource), media_type=_FHIR_JSON)
+
+
 @router.post("/Patient", status_code=201)
 async def create_patient(
     session: SessionDep,
@@ -332,6 +374,66 @@ async def create_service_request(
     created = serialize.to_fhir_service_request(order)
     return await _persist_created(
         order, "ServiceRequest", created, session, principal, key_manager, blind_indexer
+    )
+
+
+@router.put("/Patient/{canonical_id}")
+async def update_patient(  # noqa: PLR0913, PLR0917 - FastAPI route: all args are injected deps
+    canonical_id: UUID,
+    session: SessionDep,
+    principal: WritePrincipalDep,
+    key_manager: KeyDep,
+    blind_indexer: OptBlindDep,
+    body: Annotated[dict[str, Any], Body(media_type=_FHIR_JSON)],
+) -> JSONResponse:
+    """Update (or create) the Patient at this id from a FHIR R4 body. 200, or 400."""
+    return await _update_resource(
+        "Patient", canonical_id, body, session, principal, key_manager, blind_indexer
+    )
+
+
+@router.put("/Encounter/{canonical_id}")
+async def update_encounter(  # noqa: PLR0913, PLR0917 - FastAPI route: all args are injected deps
+    canonical_id: UUID,
+    session: SessionDep,
+    principal: WritePrincipalDep,
+    key_manager: KeyDep,
+    blind_indexer: OptBlindDep,
+    body: Annotated[dict[str, Any], Body(media_type=_FHIR_JSON)],
+) -> JSONResponse:
+    """Update (or create) the Encounter at this id from a FHIR R4 body. 200, or 400."""
+    return await _update_resource(
+        "Encounter", canonical_id, body, session, principal, key_manager, blind_indexer
+    )
+
+
+@router.put("/Observation/{canonical_id}")
+async def update_observation(  # noqa: PLR0913, PLR0917 - FastAPI route: all args are injected deps
+    canonical_id: UUID,
+    session: SessionDep,
+    principal: WritePrincipalDep,
+    key_manager: KeyDep,
+    blind_indexer: OptBlindDep,
+    body: Annotated[dict[str, Any], Body(media_type=_FHIR_JSON)],
+) -> JSONResponse:
+    """Update (or create) the Observation at this id from a FHIR R4 body. 200, or 400."""
+    return await _update_resource(
+        "Observation", canonical_id, body, session, principal, key_manager, blind_indexer
+    )
+
+
+@router.put("/ServiceRequest/{canonical_id}")
+async def update_service_request(  # noqa: PLR0913, PLR0917 - FastAPI route: all args are injected deps
+    canonical_id: UUID,
+    session: SessionDep,
+    principal: WritePrincipalDep,
+    key_manager: KeyDep,
+    blind_indexer: OptBlindDep,
+    body: Annotated[dict[str, Any], Body(media_type=_FHIR_JSON)],
+) -> JSONResponse:
+    """Update (or create) the Order at this id from a FHIR R4 ServiceRequest. 200, or 400."""
+    return await _update_resource(
+        "ServiceRequest", canonical_id, body, session, principal, key_manager, blind_indexer
     )
 
 

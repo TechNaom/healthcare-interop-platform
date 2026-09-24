@@ -23,10 +23,18 @@ rate limiting, OTel metrics, a Helm chart, and DB-grant compliance tests (audit
 immutability, store separation). All HIPAA technical safeguards from
 `docs/SECURITY_AND_COMPLIANCE.md` are implemented at least once.
 
-**FHIR resource set (all read + write):** Patient, Encounter, Observation,
-ServiceRequest, DiagnosticReport. **Identifier search (blind index):** Patient,
-Encounter, Observation, DiagnosticReport. HL7 ORU now also produces a
+**FHIR resource set:** Patient, Encounter, Observation, ServiceRequest,
+DiagnosticReport. Patient/Encounter/Observation/ServiceRequest support full
+**CRUD** (create, read, **update** via idempotent-upsert PUT, search);
+DiagnosticReport is read+write+search. **Identifier search (blind index):**
+Patient, Encounter, Observation, DiagnosticReport. HL7 ORU now also produces a
 DiagnosticReport (OBR-25 status) grouping its observations.
+
+**Test tiers — all live and green** (`pytest`, 194 passed vs real Postgres): unit,
+integration, regression (module-surface golden), **performance** (FHIR-read P95 <
+300 ms, SRS 7.1 — runs in-process against Postgres or against a `HIP_PERF_TARGET`
+stack), and **UAT** (all 8 acceptance scenarios in docs/UAT_PLAN.md automated and
+passing). No skipped/stub tests remain.
 
 **Security key sourcing:** real Keycloak JWKS in `gateway.auth`
 (`HIP_JWT_JWKS_URL`, live per-token lookup by `kid`) and Vault-backed
@@ -137,10 +145,12 @@ tests/          tiered by test type, selected via pytest markers
 Four types run on a defined cadence, not as a one-off phase:
 - **Unit + regression** — every PR (`pytest -m "not performance and not uat"`).
   Regression is live now via a module-surface golden test.
-- **Performance** — scheduled ([.github/workflows/performance.yml](.github/workflows/performance.yml)),
-  skips cleanly until endpoints exist; targets are provisional (ADR-006).
-- **UAT** — release-candidate gate; 8 scenarios defined in
-  [docs/UAT_PLAN.md](docs/UAT_PLAN.md), each automated + human sign-off.
+- **Performance** — scheduled ([.github/workflows/performance.yml](.github/workflows/performance.yml));
+  now a real FHIR-read P95 assertion (SRS 7.1, 300 ms), in-process against
+  Postgres or against a running `HIP_PERF_TARGET` stack. Targets provisional (ADR-006).
+- **UAT** — release-candidate gate; all 8 scenarios in
+  [docs/UAT_PLAN.md](docs/UAT_PLAN.md) are automated and passing (`pytest -m uat`),
+  awaiting only human sign-off per release candidate.
 The per-sprint matrix (which tests are written/grown/run each week) is in
 TEST_STRATEGY.md section 8.
 
