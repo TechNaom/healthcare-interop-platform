@@ -165,7 +165,7 @@ def test_uat02_deidentified_store_has_no_phi(
     # address) — none may survive into the de-identified copy.
     phi_tokens = ["DOE", "JANE", "MRN12345", "19800101", "555-1212", "123 MAIN ST", "METRO"]
 
-    async def _run() -> str:
+    async def _run() -> Any:
         await _ingest_via_mllp(clean_db, adt_a01, key_manager, blind_indexer)
         # A compliance officer inspects the de-identified store directly.
         return await _scalar(
@@ -332,7 +332,7 @@ def test_uat06_malformed_input_degrades_safely(
     """UAT-06: each malformed-message class yields a correct NACK and a
     dead-letter entry — never a crash or silent accept."""
 
-    async def _run() -> int:
+    async def _run() -> Any:
         # Unparseable (no MSH) and structurally-valid-but-unsupported (MDM) both reject.
         assert "MSA|AR" in await _ingest_via_mllp(
             clean_db, malformed_no_msh, key_manager, blind_indexer
