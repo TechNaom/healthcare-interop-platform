@@ -1,7 +1,7 @@
 # AI Handoff
 
 _Written so a different AI assistant (or human) can pick this repo up cold._
-_Last updated: 2026-09-22._
+_Last updated: 2026-09-24._
 
 ## What this repo is
 
@@ -63,9 +63,11 @@ DiagnosticReport; identifier search on Patient/Encounter/Observation/
 DiagnosticReport. Plus rate limiting, OTel metrics, real Keycloak JWKS +
 Vault-backed keys, a Helm chart (self-hosted + cloud overlay + Terraform
 reference), a synthetic-population generator, DB-grant compliance tests, and full
-observability (structured logs + OTel metrics + distributed tracing). See
-[PROJECT_STATE.md](PROJECT_STATE.md) for what's still open (more ingestion
-transports, standing up the cloud reference, C++ validator).
+observability (structured logs + OTel metrics + distributed tracing). Three
+inbound transports now share the one ingest pipeline: MLLP socket
+(`messaging.hl7.listener`), HTTP (`POST /hl7/v2`, `gateway.api.ingest`), and
+file-drop (`messaging.hl7.filedrop`). See [PROJECT_STATE.md](PROJECT_STATE.md)
+for what's still open (standing up the cloud reference, C++ validator).
 
 ## What NOT to change without a new ADR
 
@@ -78,7 +80,9 @@ transports, standing up the cloud reference, C++ validator).
 
 ## Current & next task
 
-See [PROJECT_STATE.md](PROJECT_STATE.md) "Next recommended task": Synthea bulk
-fixtures, FHIR search for Encounter/Observation, or DiagnosticReport — in that
-rough priority order. The cloud-native variant comes only after those, per the
-2026-08-25 deployment decision (self-hosted core first).
+See [PROJECT_STATE.md](PROJECT_STATE.md) "Next recommended task". The functional
+pilot is feature-complete and all three ingestion transports (MLLP, HTTP,
+file-drop) are built. Remaining work is hardening, not features: standing up the
+cloud-native reference for real (`terraform apply`) when the client is ready, and
+the separate formal HIPAA-certification track. The C++ validator (ADR-006) stays
+deferred.

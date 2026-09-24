@@ -12,7 +12,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Annotated
 
 from fastapi import Depends, Request
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hip.gateway.auth import AuthError, Principal, TokenAuthenticator
 from hip.security.blind_index import BlindIndexer
@@ -24,6 +24,17 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
     session_factory = request.app.state.session_factory
     async with session_factory() as session:
         yield session
+
+
+def get_session_factory(request: Request) -> async_sessionmaker[AsyncSession]:
+    """The app's session factory itself.
+
+    The HL7 ingestion transport (``gateway.api.ingest``) reuses the shared
+    ``ingest`` pipeline, which owns its own transaction, so it needs the factory
+    rather than a request-scoped session.
+    """
+    factory: async_sessionmaker[AsyncSession] = request.app.state.session_factory
+    return factory
 
 
 def get_key_manager(request: Request) -> KeyManager:

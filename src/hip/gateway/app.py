@@ -19,7 +19,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
 from hip import __version__
-from hip.gateway.api import admin, fhir
+from hip.gateway.api import admin, fhir, ingest
 from hip.gateway.auth import AuthError, authenticator_from_env
 from hip.gateway.ratelimit import rate_limiter_from_env
 from hip.observability.logging import configure_logging
@@ -131,6 +131,7 @@ def create_app() -> FastAPI:
 
     app.include_router(admin.router)
     app.include_router(fhir.router)
+    app.include_router(ingest.router)
     return app
 
 

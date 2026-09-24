@@ -1,7 +1,7 @@
 # Project State
 
 _Living status doc. Update at the end of every meaningful work session._
-_Last updated: 2026-09-22._
+_Last updated: 2026-09-24._
 
 ## What this is
 
@@ -51,10 +51,18 @@ ingest (`hl7.ingest`/`hl7.persist`) and every FHIR request (server span), with
 optional OTLP/HTTP export (`HIP_OTLP_ENDPOINT`) — span attributes are
 control-plane only, guarded by a no-PHI test.
 
+**Ingestion transports:** three inbound edges now share the one `ingest`
+pipeline (parse → route → map → encrypted persist → ACK) — the **MLLP** socket
+listener (`messaging.hl7.listener`), an **HTTP** transport (`POST /hl7/v2` on the
+gateway, `gateway.api.ingest`, `hl7:ingest` role, returns the HL7 ACK), and a
+**file-drop** watcher (`messaging.hl7.filedrop`, polls an inbox, moves each file
+to `processed`/`failed` with its ACK alongside). Behaviour is identical
+regardless of how a message arrives (ADR-001).
+
 **What's NOT done** (beyond the functional pilot): production hardening/pen-test/
-formal HIPAA certification (a separate, much larger track); HTTP/file-drop
-ingestion transports; the C++ high-throughput validator (ADR-006 defers it);
-standing up the cloud-native reference for real (`terraform apply`). See the
+formal HIPAA certification (a separate, much larger track); the C++
+high-throughput validator (ADR-006 defers it); standing up the cloud-native
+reference for real (`terraform apply`). See the
 `project-healthcare-interop-platform` memory record for the detailed build log.
 
 ### ADR-001 gate: cleared 2026-08-25
@@ -166,9 +174,10 @@ TEST_STRATEGY.md section 8.
 
 ## Next recommended task
 
-The functional pilot is feature-complete. Remaining work is hardening, not new
-features: **additional ingestion transports** (HTTP/file-drop alongside MLLP),
-and, when the client is ready, **actually standing up the cloud-native
-reference** (`terraform apply` in their account + an end-to-end managed-services
-smoke test). The C++ high-throughput validator (ADR-006) remains a deliberately
-deferred future phase.
+The functional pilot is feature-complete, and the additional ingestion
+transports (HTTP + file-drop) are now built alongside MLLP. Remaining work is
+hardening, not new features: when the client is ready, **actually standing up the
+cloud-native reference** (`terraform apply` in their account + an end-to-end
+managed-services smoke test), and production hardening toward formal HIPAA
+certification (pen-test, risk assessment, HA/DR, BAAs). The C++ high-throughput
+validator (ADR-006) remains a deliberately deferred future phase.
