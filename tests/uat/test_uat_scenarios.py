@@ -27,11 +27,8 @@ from sqlalchemy import text
 
 from hip.gateway.app import create_app
 from hip.gateway.auth import TokenAuthenticator
-from hip.messaging.canonical import model as m
-from hip.messaging.canonical.mapper import map_message
 from hip.messaging.hl7.listener import MLLPListener
 from hip.messaging.hl7.mllp import MLLPBuffer, wrap
-from hip.messaging.hl7.parser import parse
 from hip.persistence.db import make_engine, make_sessionmaker
 from hip.security.blind_index import BlindIndexer
 from hip.security.keymanager import KeyManager
@@ -254,33 +251,31 @@ def test_uat04_order_and_results(
         # ORU over MLLP: attaches observations + produces a DiagnosticReport.
         assert "MSA|AA" in await _ingest_via_mllp(clean_db, oru_r01, key_manager, blind_indexer)
 
-        orders = await _scalar(
-            clean_db, "SELECT count(*) FROM phi_resources WHERE resource_type = 'Order'"
-        )
         observations = await _scalar(
             clean_db, "SELECT count(*) FROM phi_resources WHERE resource_type = 'Observation'"
         )
-        # The ORU's DiagnosticReport (OBR-3 filler FILL1) is retrievable via the
-        # public FHIR search — the report groups the attached results.
         app = _build_app(clean_db, key_manager, blind_indexer)
         async with _client(app) as client:
-            dr = await client.get(
-                "/fhir/DiagnosticReport?identifier=FILL1",
-                headers=_auth_header("fhir:read", "phi:full"),
-            )
-        return {"orders": orders, "observations": observations, "dr": dr}
+            read = _auth_header("fhir:read", "phi:full")
+            # The ORM's order is discoverable + readable as a ServiceRequest.
+            order_id = await _first_id(client, "ServiceRequest", "FILL-9")
+            sr = await client.get(f"/fhir/ServiceRequest/{order_id}", headers=read)
+            # The ORU's DiagnosticReport (OBR-3 filler FILL1) groups the results.
+            dr = await client.get("/fhir/DiagnosticReport?identifier=FILL1", headers=read)
+        return {"observations": observations, "sr": sr, "dr": dr}
 
     r = asyncio.run(_run())
 
-    # ORM created exactly one Order; ORU attached at least one Observation.
-    assert r["orders"] == 1
-    assert r["observations"] >= 1
-
+    # ORM created an Order, readable via the public FHIR API as a ServiceRequest.
+    assert r["sr"].status_code == 200
+    sr = r["sr"].json()
+    assert sr["resourceType"] == "ServiceRequest"
+    assert sr["intent"] == "order"
     # Order status derivation matches DATA_MODEL.md: ORC-5 absent -> ORC-1 'NW' -> active.
-    order = map_message(parse(orm)).orders[0]
-    assert order.status is m.RequestStatus.active
+    assert sr["status"] == "active"
 
-    # The results are discoverable as a DiagnosticReport through the public API.
+    # ORU attached at least one Observation, discoverable as a DiagnosticReport.
+    assert r["observations"] >= 1
     assert r["dr"].status_code == 200
     dr_bundle = r["dr"].json()
     assert dr_bundle["total"] >= 1

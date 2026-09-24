@@ -5,7 +5,7 @@ model (ADR-001) and render it as FHIR via ``canonical.fhir`` — routes never to
 HL7. Responses use ``application/fhir+json`` and a FHIR ``OperationOutcome`` on
 error. Scope now: Patient/Encounter/Observation/ServiceRequest full CRUD (create,
 read, update via idempotent upsert, search) and identifier search for
-Patient/Encounter/Observation via the blind index.
+Patient/Encounter/Observation/ServiceRequest/DiagnosticReport via the blind index.
 """
 
 from __future__ import annotations
@@ -48,6 +48,8 @@ _SERIALIZERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "DiagnosticReport": lambda p: serialize.to_fhir_diagnostic_report(
         m.DiagnosticReport.model_validate(p)
     ),
+    # Canonical store type is "Order"; the FHIR name is ServiceRequest.
+    "ServiceRequest": lambda p: serialize.to_fhir_service_request(m.Order.model_validate(p)),
 }
 
 # RBAC roles (SRS 5.1). read = view resources; write = create/update.
@@ -106,17 +108,21 @@ async def _search_by_identifier(  # noqa: PLR0913, PLR0917 - cohesive search hel
     principal: Principal,
     key_manager: KeyManager,
     blind_indexer: BlindIndexer,
+    *,
+    stored_type: str | None = None,
 ) -> JSONResponse:
     """Search ``resource_type`` by identifier via the blind index → FHIR Bundle.
 
     ``identifier`` may be ``system|value`` or a bare ``value``; the value is
     matched exactly against the HMAC index (no plaintext hits the query). Each
     entry is minimum-necessary filtered for the caller and read-audited.
+    ``stored_type`` overrides the canonical type used for the index lookup when it
+    differs from the FHIR name (Order↔ServiceRequest).
     """
     value = identifier.rsplit("|", 1)[-1]
     serialize_payload = _SERIALIZERS[resource_type]
     repo = PhiRepository(session, key_manager, blind_indexer)
-    ids = await repo.find_ids_by_identifier(resource_type, value)
+    ids = await repo.find_ids_by_identifier(stored_type or resource_type, value)
 
     full = principal.has_role(FULL_ACCESS_ROLE)
     entries: list[dict[str, Any]] = []
@@ -337,6 +343,26 @@ async def create_observation(
     created = serialize.to_fhir_observation(observation)
     return await _persist_created(
         observation, "Observation", created, session, principal, key_manager, blind_indexer
+    )
+
+
+@router.get("/ServiceRequest")
+async def search_service_request(
+    session: SessionDep,
+    principal: PrincipalDep,
+    key_manager: KeyDep,
+    blind_indexer: BlindDep,
+    identifier: str,
+) -> JSONResponse:
+    """Search orders by placer/filler identifier via the blind index (Order store)."""
+    return await _search_by_identifier(
+        "ServiceRequest",
+        identifier,
+        session,
+        principal,
+        key_manager,
+        blind_indexer,
+        stored_type="Order",
     )
 
 

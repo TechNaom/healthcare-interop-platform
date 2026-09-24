@@ -26,9 +26,10 @@ immutability, store separation). All HIPAA technical safeguards from
 **FHIR resource set:** Patient, Encounter, Observation, ServiceRequest,
 DiagnosticReport. Patient/Encounter/Observation/ServiceRequest support full
 **CRUD** (create, read, **update** via idempotent-upsert PUT, search);
-DiagnosticReport is read+write+search. **Identifier search (blind index):**
-Patient, Encounter, Observation, DiagnosticReport. HL7 ORU now also produces a
-DiagnosticReport (OBR-25 status) grouping its observations.
+DiagnosticReport is read+write+search. **Identifier search (blind index) now
+covers every core resource:** Patient, Encounter, Observation, ServiceRequest
+(placer/filler), DiagnosticReport. HL7 ORU now also produces a DiagnosticReport
+(OBR-25 status) grouping its observations.
 
 **Test tiers — all live and green** (`pytest`, 194 passed vs real Postgres): unit,
 integration, regression (module-surface golden), **performance** (FHIR-read P95 <

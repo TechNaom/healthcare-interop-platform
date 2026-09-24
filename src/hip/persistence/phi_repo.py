@@ -37,6 +37,11 @@ def _index_values(resource: m.CanonicalResource) -> list[str]:
         values.append(resource.account_number.value)
     if isinstance(resource, m.Encounter):
         values += [i.value for i in (resource.visit_number, resource.account_number) if i]
+    if isinstance(resource, m.Order):
+        # Placer/filler order numbers are separate fields, not in `identifiers`.
+        values += [
+            i.value for i in (resource.placer_order_number, resource.filler_order_number) if i
+        ]
     return values
 
 
